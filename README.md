@@ -1,8 +1,3 @@
-Here’s a **README** file that you can use for your image upload and management service. This will help document the setup, usage, and API endpoints for your backend service.
-
-### README.md
-
-```markdown
 # Image Upload and Management Service
 
 This service provides a backend API for handling image uploads, compression, and deletion using **Firebase Storage** and **Sharp** for image processing. It also supports **CORS** for interaction with a frontend.
@@ -167,16 +162,3 @@ app.listen(3003, () => {
 ## License
 
 This project is licensed under the MIT License.
-```
-
-### Summary of Sections:
-1. **Features**: Describes the functionality of the service.
-2. **Prerequisites**: Lists the necessary setup steps (Node.js, Firebase, etc.).
-3. **Setup**: Details how to install dependencies, set up Firebase Admin SDK, and run the server.
-4. **API Endpoints**: Explains how to upload and delete images using the provided API endpoints.
-5. **CORS**: Provides guidance on configuring CORS to allow requests from the frontend.
-6. **File Upload Size Limits**: Shows how to adjust the file size limit for uploads.
-7. **Port Configuration**: Instructs how to change the server port.
-8. **License**: Specifies the license for the project.
-
-This README should provide clear instructions for setting up and using the service. Let me know if you want any further customization or have other questions!
