@@ -2,15 +2,16 @@
     "name": "image-upload-service",
     "version": "1.0.0",
     "description": "Image upload and processing service",
-    "main": "app.js",
+    "main": "index.js",
     "scripts": {
-        "start": "node app.js"
+        "start": "node index.js"
     },
     "dependencies": {
         "cors": "^2.8.5",
-        "express": "^4.17.1",
+        "express": "^4.21.0",
         "firebase-admin": "^12.5.0",
-        "multer": "^1.4.2",
+        "jimp": "0.16.1",
+        "multer": "^1.4.5-lts.1",
         "sharp": "^0.33.5"
     }
 }

@@ -1,9 +1,8 @@
 const cors = require('cors');
 const express = require('express');
 const multer = require('multer');
-const sharp = require('sharp');
+const Jimp = require('jimp');
 const admin = require('firebase-admin');
-const serviceAccount = require('./path-to-your-service-account.json');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -11,49 +10,78 @@ const upload = multer({ storage: multer.memoryStorage() });
 // Initialize Firebase Admin SDK
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    storageBucket: 'your-firebase-storage-bucket' // Your Firebase Storage bucket
+    storageBucket: 'photograma-c2078.appspot.com',
 });
 
 // Enable CORS
 app.use(cors({
-    origin: 'http://localhost:3000', // Allow requests from your frontend running on port 3001
+    origin: 'http://192.168.1.181:3000', // Allow requests from your frontend
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true // Allow credentials if needed (cookies, authorization headers, etc.)
+    credentials: true
 }));
 
 const bucket = admin.storage().bucket();
 
 // Backend route to handle image upload
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+app.post('/upload', upload.single('image'), async (req, res) => {
+    // Check if the uploaded file is an image
+    if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ error: `Uploaded file is not an image. Mimetype: ${req.file.mimetype}` });
+    }
+
     try {
+        console.log(req.file.buffer.length);
+
         const fileBuffer = req.file.buffer;
-        const compressedBuffer = await sharp(fileBuffer)
-            .resize(1440)  // Resize to the dimensions you need
-            .toFormat('jpeg', { quality: 80 })  // Compress image to JPEG
-            .toBuffer();
+
+        // Load image using Jimp from buffer
+        let image;
+        try {
+            image = await Jimp.read(fileBuffer);
+        } catch (error) {
+            console.error('Error reading image with Jimp:', error);
+            return res.status(500).json({ error: 'Failed to read image', details: error.message });
+        }
+
+        // Resize and compress the image
+        image.resize(1440, Jimp.AUTO);  // Resize to 1440px width, keep aspect ratio
+        image.quality(80);  // Set JPEG quality to 80%
+
+        // Convert the image back to buffer
+        const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
         const fileName = `images/${Date.now()}-${req.file.originalname}`;
         const file = bucket.file(fileName);
 
         // Upload the compressed image to Firebase Storage
-        const uploadResponse = await file.save(compressedBuffer, {
-            metadata: { contentType: 'image/jpeg' },
-            public: true,  // If you want the image to be publicly accessible
-        });
+        try {
+            await file.save(compressedBuffer, {
+                metadata: { contentType: 'image/jpeg' },
+                public: true,
+            });
+            console.log(`Image uploaded to Firebase Storage as ${fileName}`);
+        } catch (error) {
+            console.error('Error uploading to Firebase Storage:', error);
+            return res.status(500).json({ error: 'Failed to upload image to Firebase', details: error.message });
+        }
 
         // Get the public URL of the uploaded file
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
-
         res.json({ url: publicUrl });
+
     } catch (error) {
         console.error('Error uploading image:', error);
-        res.status(500).json({ error: 'Failed to upload image' });
+        res.status(500).json({ error: 'Failed to upload image', details: error.message });
     }
 });
 
+app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Server is running on http://127.0.0.1:${PORT}`);
+});
+
 // Backend route to handle image deletion
-app.post('/api/delete-image', async (req, res) => {
+app.post('/delete-image', async (req, res) => {
     try {
         const { imgName } = req.body;
 
@@ -75,6 +103,8 @@ app.post('/api/delete-image', async (req, res) => {
 });
 
 // Start the backend server
-app.listen(3003, () => {
-    console.log('Server is running on port 3003');
+const PORT = process.env.PORT || 3003; // Default to 3003 if not provided
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
+
