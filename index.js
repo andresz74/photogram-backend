@@ -25,7 +25,7 @@ app.use(cors({
 const bucket = admin.storage().bucket();
 
 // Backend route to handle image upload
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+app.post('/upload', upload.single('image'), async (req, res) => {
     try {
         const fileBuffer = req.file.buffer;
         const compressedBuffer = await sharp(fileBuffer)
@@ -53,7 +53,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 });
 
 // Backend route to handle image deletion
-app.post('/api/delete-image', async (req, res) => {
+app.post('/delete-image', async (req, res) => {
     try {
         const { imgName } = req.body;
 
