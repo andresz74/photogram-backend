@@ -75,7 +75,7 @@ app.post('/delete-image', async (req, res) => {
 });
 
 // Start the backend server
-const PORT = process.env.PORT || 3000; // Default to 3000 if not provided
+const PORT = process.env.PORT || 3003; // Default to 3003 if not provided
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
