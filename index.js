@@ -52,6 +52,10 @@ app.post('/upload', upload.single('image'), async (req, res) => {
     }
 });
 
+app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Server is running on http://127.0.0.1:${PORT}`);
+});
+
 // Backend route to handle image deletion
 app.post('/delete-image', async (req, res) => {
     try {
