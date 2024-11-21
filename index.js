@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const Jimp = require('jimp');
 const admin = require('firebase-admin');
+const serviceAccount = require('./photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -14,17 +15,28 @@ admin.initializeApp({
 });
 
 // Enable CORS
+const allowedOrigins = ['https://apps.andreszenteno.com','http://localhost:3000', 'http://192.168.1.181:3000', 'https://192.168.1.181'];
+
 app.use(cors({
-    origin: 'http://192.168.1.181:3000', // Allow requests from your frontend
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
+    credentials: true,
 }));
+
 
 const bucket = admin.storage().bucket();
 
 // Backend route to handle image upload
 app.post('/upload', upload.single('image'), async (req, res) => {
+    console.log('Received file:', req.file.originalname);
+
     // Check if the uploaded file is an image
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: `Uploaded file is not an image. Mimetype: ${req.file.mimetype}` });
@@ -52,6 +64,9 @@ app.post('/upload', upload.single('image'), async (req, res) => {
         const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
         const fileName = `images/${Date.now()}-${req.file.originalname}`;
+        // Log the file name and metadata being saved
+        console.log('File name:', fileName);
+
         const file = bucket.file(fileName);
 
         // Upload the compressed image to Firebase Storage
@@ -74,10 +89,6 @@ app.post('/upload', upload.single('image'), async (req, res) => {
         console.error('Error uploading image:', error);
         res.status(500).json({ error: 'Failed to upload image', details: error.message });
     }
-});
-
-app.listen(PORT, '127.0.0.1', () => {
-    console.log(`Server is running on http://127.0.0.1:${PORT}`);
 });
 
 // Backend route to handle image deletion
@@ -104,6 +115,7 @@ app.post('/delete-image', async (req, res) => {
 
 // Start the backend server
 const PORT = process.env.PORT || 3003; // Default to 3003 if not provided
+
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
