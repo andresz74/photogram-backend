@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const cors = require('cors');
 const express = require('express');
 const multer = require('multer');
@@ -15,7 +17,7 @@ admin.initializeApp({
 });
 
 // Enable CORS
-const allowedOrigins = ['https://apps.andreszenteno.com','http://localhost:3000', 'http://192.168.1.181:3000', 'https://192.168.1.181'];
+const allowedOrigins = ['https://apps.andreszenteno.com', 'http://localhost:3000', 'http://192.168.1.181:3000', 'https://192.168.1.181'];
 
 app.use(cors({
     origin: (origin, callback) => {
@@ -33,8 +35,55 @@ app.use(cors({
 
 const bucket = admin.storage().bucket();
 
-// Backend route to handle image upload
+// 1. Resize Service
+app.post('/resize', upload.single('image'), async (req, res) => {
+    if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ error: 'Uploaded file is not an image.' });
+    }
+
+    try {
+        const fileBuffer = req.file.buffer;
+
+        // Load and process the image
+        const image = await Jimp.read(fileBuffer);
+        image.resize(1440, Jimp.AUTO);  // Resize to 1440px width
+        image.quality(80);  // Set JPEG quality to 80%
+
+        // Get the resized image buffer
+        const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+        res.set('Content-Type', 'image/jpeg');
+        res.send(resizedBuffer); // Send the resized image buffer
+    } catch (error) {
+        console.error('Error resizing image:', error);
+        res.status(500).json({ error: 'Failed to resize image', details: error.message });
+    }
+});
+
+// 2. Upload Service
 app.post('/upload', upload.single('image'), async (req, res) => {
+    try {
+        const fileBuffer = req.file.buffer;
+
+        const fileName = `images/${Date.now()}-${req.file.originalname}`;
+        const file = bucket.file(fileName);
+
+        // Upload the image to Firebase Storage
+        await file.save(fileBuffer, {
+            metadata: { contentType: 'image/jpeg' },
+            public: true,
+        });
+
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        res.json({ url: publicUrl });
+    } catch (error) {
+        console.error('Error uploading to Firebase Storage:', error);
+        res.status(500).json({ error: 'Failed to upload image to Firebase', details: error.message });
+    }
+});
+
+// 3. Resize-Upload Service
+app.post('/resize-upload', upload.single('image'), async (req, res) => {
     console.log('Received file:', req.file.originalname);
 
     // Check if the uploaded file is an image
@@ -91,7 +140,7 @@ app.post('/upload', upload.single('image'), async (req, res) => {
     }
 });
 
-// Backend route to handle image deletion
+// 4. Delete Service
 app.post('/delete-image', async (req, res) => {
     try {
         const { imgName } = req.body;
@@ -114,9 +163,9 @@ app.post('/delete-image', async (req, res) => {
 });
 
 // Start the backend server
-const PORT = process.env.PORT || 3003; // Default to 3003 if not provided
+const port = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Server is running on port ${port}`);
 });
 

@@ -21,5 +21,5 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
+.env
 photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json
