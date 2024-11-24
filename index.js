@@ -35,6 +35,19 @@ app.use(cors({
 
 const bucket = admin.storage().bucket();
 
+// Health check route
+app.get('/health', (req, res) => {
+    res.send('OK');
+});
+
+// Debug
+app.get('/debug', (req, res) => {
+    res.json({
+        ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+        region: process.env.VERCEL_REGION || 'local',
+    });
+});
+
 // 1. Resize Service
 app.post('/resize', upload.single('image'), async (req, res) => {
     if (!req.file.mimetype.startsWith('image/')) {
