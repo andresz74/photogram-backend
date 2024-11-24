@@ -3,14 +3,17 @@ require('dotenv').config();
 const cors = require('cors');
 const express = require('express');
 const multer = require('multer');
-const Jimp = require('jimp');
+
 const admin = require('firebase-admin');
+const crypto = require('crypto');
+const Jimp = require('jimp');
 const serviceAccount = require('./photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json');
+
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE_MB, 10) * 1024 * 1024;
 console.log(`Max file size allowed: ${MAX_FILE_SIZE} bytes`);
 
 const app = express();
-const upload = multer({ 
+const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_FILE_SIZE },
 });
@@ -89,8 +92,13 @@ app.post('/resize', upload.single('image'), async (req, res) => {
 app.post('/upload', upload.single('image'), async (req, res) => {
     try {
         const fileBuffer = req.file.buffer;
-
-        const fileName = `images/${Date.now()}-${req.file.originalname}`;
+        
+        // Generate normalized file name
+        const randomString = crypto.randomBytes(6).toString('hex');
+        const fileName = `images/${Date.now()}-${randomString}-photogram`;
+        // Log the file name and metadata being saved
+        console.log('File name:', fileName);
+        
         const file = bucket.file(fileName);
 
         // Upload the image to Firebase Storage
@@ -137,7 +145,9 @@ app.post('/resize-upload', upload.single('image'), async (req, res) => {
         // Convert the image back to buffer
         const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
 
-        const fileName = `images/${Date.now()}-${req.file.originalname}`;
+        // Generate normalized file name
+        const randomString = crypto.randomBytes(6).toString('hex');
+        const fileName = `images/${Date.now()}-${randomString}-photogram`;
         // Log the file name and metadata being saved
         console.log('File name:', fileName);
 
