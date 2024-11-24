@@ -6,9 +6,14 @@ const multer = require('multer');
 const Jimp = require('jimp');
 const admin = require('firebase-admin');
 const serviceAccount = require('./photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json');
+const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE_MB, 10) * 1024 * 1024;
+console.log(`Max file size allowed: ${MAX_FILE_SIZE} bytes`);
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_FILE_SIZE },
+});
 
 // Initialize Firebase Admin SDK
 admin.initializeApp({
@@ -32,6 +37,13 @@ app.use(cors({
     credentials: true,
 }));
 
+app.use((req, res, next) => {
+    const contentLength = parseInt(req.headers['content-length'], 10);
+    if (contentLength > MAX_FILE_SIZE) {
+        return res.status(413).json({ error: 'Payload Too Large' });
+    }
+    next();
+});
 
 const bucket = admin.storage().bucket();
 
