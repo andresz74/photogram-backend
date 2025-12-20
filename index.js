@@ -72,7 +72,14 @@ const limiter = rateLimit({
 });
 
 // Enable CORS
-const allowedOrigins = ['https://apps.andreszenteno.com', 'http://localhost:3000', 'http://192.168.1.181:3000', 'https://192.168.1.181'];
+const allowedOrigins = [
+    'https://apps.andreszenteno.com', 
+    'http://localhost:3000', 'http://localhost:3001', 
+    'http://192.168.1.181:3000', 
+    'https://192.168.1.181',
+    'http://192.168.1.242:3001',
+    'https://photogram.andreszenteno.com'
+];
 
 app.use(cors({
     origin: (origin, callback) => {
