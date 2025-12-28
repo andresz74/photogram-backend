@@ -198,6 +198,9 @@ app.post('/resize', heavyLimiter, multipartSizeGuard, upload.single('image'), wi
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: 'Uploaded file is not an image.' });
     }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
+    }
 
     try {
         res.set('Content-Type', 'image/jpeg');
@@ -227,6 +230,9 @@ app.post('/upload', defaultLimiter, multipartSizeGuard, upload.single('image'), 
     }
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: 'Uploaded file is not an image.' });
+    }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
     }
 
     try {
@@ -272,6 +278,9 @@ app.post('/resize-upload', heavyLimiter, multipartSizeGuard, upload.single('imag
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: `Uploaded file is not an image. Mimetype: ${req.file.mimetype}` });
     }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
+    }
 
     try {
         const fileName = `images/${uuid()}.jpg`;
@@ -299,6 +308,10 @@ app.post('/resize-upload', heavyLimiter, multipartSizeGuard, upload.single('imag
         res.json({ url: publicUrl });
 
     } catch (error) {
+        const message = String(error?.message || '');
+        if (message.includes('Input file is missing') || message.includes('unsupported image format') || message.includes('corrupt')) {
+            return res.status(400).json({ error: 'Invalid image file.' });
+        }
         logError('Error uploading image', error);
         res.status(500).json({ error: 'Failed to upload image', details: error.message });
     } finally {
