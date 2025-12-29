@@ -3,18 +3,66 @@ require('dotenv').config();
 const cors = require('cors');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs');
 const multer = require('multer');
-const Jimp = require('jimp');
+const os = require('os');
+const path = require('path');
+const { pipeline } = require('stream/promises');
 const admin = require('firebase-admin');
 const { v4: uuid } = require('uuid');
 
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LOG_LEVEL_ORDER = { silent: 0, error: 1, warn: 2, info: 3, debug: 4 };
+const shouldLog = (level) =>
+    (LOG_LEVEL_ORDER[level] ?? LOG_LEVEL_ORDER.info) <= (LOG_LEVEL_ORDER[LOG_LEVEL] ?? LOG_LEVEL_ORDER.info);
+
 const log = (level, message, meta = {}) => {
+    if (!shouldLog(level)) return;
     const payload = { level, message, timestamp: new Date().toISOString(), ...meta };
     const line = JSON.stringify(payload);
     if (level === 'error') {
         console.error(line);
     } else {
         console.log(line);
+    }
+};
+
+const logError = (message, error, meta = {}) => {
+    const payload = { error: error?.message, ...meta };
+    if (shouldLog('debug') && error?.stack) payload.stack = error.stack;
+    log('error', message, payload);
+};
+
+const createSemaphore = (maxConcurrent) => {
+    const max = Math.max(1, Number(maxConcurrent) || 1);
+    let current = 0;
+    const waiting = [];
+    const acquire = async () => {
+        if (current < max) {
+            current += 1;
+            return () => {
+                current -= 1;
+                const next = waiting.shift();
+                if (next) next();
+            };
+        }
+        await new Promise((resolve) => waiting.push(resolve));
+        current += 1;
+        return () => {
+            current -= 1;
+            const next = waiting.shift();
+            if (next) next();
+        };
+    };
+    return { acquire };
+};
+
+const withSemaphore = (semaphore, handler) => async (req, res, next) => {
+    const release = await semaphore.acquire();
+    try {
+        await handler(req, res, next);
+    } finally {
+        release();
     }
 };
 
@@ -41,8 +89,6 @@ const MAX_FILE_SIZE = Number.isFinite(maxFileSizeEnv) && maxFileSizeEnv > 0
 log('info', 'Configured max file size', { bytes: MAX_FILE_SIZE });
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 const imageFileFilter = (req, file, cb) => {
     if (file.mimetype && file.mimetype.startsWith('image/')) {
@@ -51,8 +97,21 @@ const imageFileFilter = (req, file, cb) => {
     return cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'image'));
 };
 
+const uploadTempDir = path.join(os.tmpdir(), 'photogram-backend-uploads');
+try {
+    fs.mkdirSync(uploadTempDir, { recursive: true });
+} catch (error) {
+    log('error', 'Failed to create temp upload directory', { uploadTempDir, error: error.message });
+    process.exit(1);
+}
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadTempDir),
+    filename: (req, file, cb) => cb(null, `${uuid()}-${Date.now()}`),
+});
+
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage,
     limits: { fileSize: MAX_FILE_SIZE },
     fileFilter: imageFileFilter,
 });
@@ -63,7 +122,7 @@ admin.initializeApp({
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'photograma-c2078.appspot.com',
 });
 
-const limiter = rateLimit({
+const defaultLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 60,
     standardHeaders: true,
@@ -71,19 +130,27 @@ const limiter = rateLimit({
     handler: (req, res) => res.status(429).json({ error: 'Too many requests, please try again later.' }),
 });
 
+const heavyLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => res.status(429).json({ error: 'Too many requests, please try again later.' }),
+});
+
 // Enable CORS
-const allowedOrigins = [
+const allowedOrigins = new Set([
     'https://apps.andreszenteno.com', 
     'http://localhost:3000', 'http://localhost:3001', 
     'http://192.168.1.181:3000', 
     'https://192.168.1.181',
     'http://192.168.1.242:3001',
     'https://photogram.andreszenteno.com'
-];
+]);
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || allowedOrigins.has(origin)) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));
@@ -94,26 +161,33 @@ app.use(cors({
     credentials: true,
 }));
 
-app.use(limiter);
-
-app.use((req, res, next) => {
+const multipartSizeGuard = (req, res, next) => {
     const contentLengthHeader = req.headers['content-length'];
     const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
     if (Number.isFinite(contentLength) && contentLength > MAX_FILE_SIZE) {
         return res.status(413).json({ error: 'Payload Too Large' });
     }
     next();
-});
+};
 
 const bucket = admin.storage().bucket();
+const uploadAcl = process.env.FIREBASE_UPLOAD_ACL || 'publicRead';
+const uploadAclLower = uploadAcl.toLowerCase();
+const usePredefinedAcl = uploadAclLower !== 'none' && uploadAclLower !== 'disabled';
+const resizeConcurrency = Number(process.env.RESIZE_CONCURRENCY || 1);
+const resizeSemaphore = createSemaphore(resizeConcurrency);
+const IMAGE_PROCESSOR = (process.env.IMAGE_PROCESSOR || 'sharp').toLowerCase(); // 'sharp' | 'jimp'
+
+const getSharp = () => require('sharp');
+const getJimp = () => require('jimp');
 
 // Health check route
-app.get('/health', (req, res) => {
+app.get('/health', defaultLimiter, (req, res) => {
     res.send('OK');
 });
 
 // Debug
-app.get('/debug', (req, res) => {
+app.get('/debug', defaultLimiter, (req, res) => {
     res.json({
         ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
         region: process.env.VERCEL_REGION || 'local',
@@ -121,67 +195,93 @@ app.get('/debug', (req, res) => {
 });
 
 // 1. Resize Service
-app.post('/resize', upload.single('image'), async (req, res) => {
+app.post('/resize', heavyLimiter, multipartSizeGuard, upload.single('image'), withSemaphore(resizeSemaphore, async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No image file provided.' });
     }
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: 'Uploaded file is not an image.' });
     }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
+    }
 
     try {
-        const fileBuffer = req.file.buffer;
-
-        // Load and process the image
-        const image = await Jimp.read(fileBuffer);
-        image.resize(1440, Jimp.AUTO);  // Resize to 1440px width
-        image.quality(80);  // Set JPEG quality to 80%
-
-        // Get the resized image buffer
-        const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-
         res.set('Content-Type', 'image/jpeg');
-        res.send(resizedBuffer); // Send the resized image buffer
+        if (IMAGE_PROCESSOR === 'jimp') {
+            const Jimp = getJimp();
+            const image = await Jimp.read(req.file.path);
+            image.resize(1440, Jimp.AUTO);
+            image.quality(80);
+            const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            res.send(resizedBuffer);
+        } else {
+            const sharp = getSharp();
+            await pipeline(
+                fs.createReadStream(req.file.path),
+                sharp().rotate().resize(1440).jpeg({ quality: 80 }),
+                res,
+            );
+        }
     } catch (error) {
-        log('error', 'Error resizing image', { error: error.message, stack: error.stack });
-        res.status(500).json({ error: 'Failed to resize image', details: error.message });
+        logError('Error resizing image', error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to resize image', details: error.message });
+        } else {
+            res.destroy(error);
+        }
+    } finally {
+        if (req.file?.path) {
+            fs.promises.unlink(req.file.path).catch(() => {});
+        }
     }
-});
+}));
 
 // 2. Upload Service
-app.post('/upload', upload.single('image'), async (req, res) => {
+app.post('/upload', defaultLimiter, multipartSizeGuard, upload.single('image'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No image file provided.' });
     }
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: 'Uploaded file is not an image.' });
     }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
+    }
 
     try {
-        const fileBuffer = req.file.buffer;
-
-        const fileName = `images/${uuid()}.jpg`;
+        const mime = req.file.mimetype || 'application/octet-stream';
+        const mimeToExt = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif' };
+        const ext = mimeToExt[mime] || 'bin';
+        const fileName = `images/${uuid()}.${ext}`;
         const file = bucket.file(fileName);
 
-        // Upload the image to Firebase Storage
-        await file.save(fileBuffer, {
-            metadata: {
-                contentType: req.file.mimetype,
-                cacheControl: 'public,max-age=31536000,immutable',
-            },
-            public: true,
-        });
+        await pipeline(
+            fs.createReadStream(req.file.path),
+            file.createWriteStream({
+                resumable: false,
+                ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
+                metadata: {
+                    contentType: mime,
+                    cacheControl: 'public,max-age=31536000,immutable',
+                },
+            }),
+        );
 
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
         res.json({ url: publicUrl });
     } catch (error) {
-        log('error', 'Error uploading to Firebase Storage', { error: error.message, stack: error.stack });
+        logError('Error uploading to Firebase Storage', error);
         res.status(500).json({ error: 'Failed to upload image to Firebase', details: error.message });
+    } finally {
+        if (req.file?.path) {
+            fs.promises.unlink(req.file.path).catch(() => {});
+        }
     }
 });
 
 // 3. Resize-Upload Service
-app.post('/resize-upload', upload.single('image'), async (req, res) => {
+app.post('/resize-upload', heavyLimiter, multipartSizeGuard, upload.single('image'), withSemaphore(resizeSemaphore, async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No image file provided.' });
     }
@@ -192,61 +292,72 @@ app.post('/resize-upload', upload.single('image'), async (req, res) => {
     if (!req.file.mimetype.startsWith('image/')) {
         return res.status(400).json({ error: `Uploaded file is not an image. Mimetype: ${req.file.mimetype}` });
     }
+    if (!req.file.size) {
+        return res.status(400).json({ error: 'Empty image file provided.' });
+    }
 
     try {
-        log('info', 'Incoming file buffer length', { bytes: req.file.buffer.length });
-
-        const fileBuffer = req.file.buffer;
-
-        // Load image using Jimp from buffer
-        let image;
-        try {
-            image = await Jimp.read(fileBuffer);
-        } catch (error) {
-            log('error', 'Error reading image with Jimp', { error: error.message, stack: error.stack });
-            return res.status(500).json({ error: 'Failed to read image', details: error.message });
-        }
-
-        // Resize and compress the image
-        image.resize(1440, Jimp.AUTO);  // Resize to 1440px width, keep aspect ratio
-        image.quality(80);  // Set JPEG quality to 80%
-
-        // Convert the image back to buffer
-        const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
-
         const fileName = `images/${uuid()}.jpg`;
         // Log the file name and metadata being saved
         log('info', 'Uploading resized image', { fileName });
 
         const file = bucket.file(fileName);
 
-        // Upload the compressed image to Firebase Storage
-        try {
+        if (IMAGE_PROCESSOR === 'jimp') {
+            const Jimp = getJimp();
+            const image = await Jimp.read(req.file.path);
+            image.resize(1440, Jimp.AUTO);
+            image.quality(80);
+            const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
             await file.save(compressedBuffer, {
                 metadata: {
                     contentType: 'image/jpeg',
                     cacheControl: 'public,max-age=31536000,immutable',
                 },
-                public: true,
+                ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
             });
-            log('info', 'Image uploaded to Firebase Storage', { fileName });
-        } catch (error) {
-            log('error', 'Error uploading to Firebase Storage', { error: error.message, stack: error.stack });
-            return res.status(500).json({ error: 'Failed to upload image to Firebase', details: error.message });
+        } else {
+            const sharp = getSharp();
+            await pipeline(
+                fs.createReadStream(req.file.path),
+                sharp().rotate().resize(1440).jpeg({ quality: 80 }),
+                file.createWriteStream({
+                    resumable: false,
+                    ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
+                    metadata: {
+                        contentType: 'image/jpeg',
+                        cacheControl: 'public,max-age=31536000,immutable',
+                    },
+                }),
+            );
         }
+        log('info', 'Image uploaded to Firebase Storage', { fileName });
 
         // Get the public URL of the uploaded file
         const publicUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
         res.json({ url: publicUrl });
 
     } catch (error) {
-        log('error', 'Error uploading image', { error: error.message, stack: error.stack });
+        const message = String(error?.message || '');
+        if (message.includes('Input file is missing') || message.includes('unsupported image format') || message.includes('corrupt')) {
+            return res.status(400).json({ error: 'Invalid image file.' });
+        }
+        logError('Error uploading image', error);
         res.status(500).json({ error: 'Failed to upload image', details: error.message });
+    } finally {
+        if (req.file?.path) {
+            fs.promises.unlink(req.file.path).catch(() => {});
+        }
     }
-});
+}));
 
 // 4. Delete Service
-app.post('/delete-image', async (req, res) => {
+app.post(
+    '/delete-image',
+    defaultLimiter,
+    express.json({ limit: '2kb' }),
+    express.urlencoded({ extended: true, limit: '2kb' }),
+    async (req, res) => {
     try {
         const { imgName } = req.body;
 
@@ -262,7 +373,7 @@ app.post('/delete-image', async (req, res) => {
 
         return res.status(200).send('File successfully deleted');
     } catch (error) {
-        log('error', 'Error deleting file from Firebase Storage', { error: error.message, stack: error.stack });
+        logError('Error deleting file from Firebase Storage', error);
         return res.status(500).send('Failed to delete the image');
     }
 });
@@ -285,6 +396,6 @@ app.use((err, req, res, next) => {
 
 // Fallback error handler
 app.use((err, req, res, next) => {
-    log('error', 'Unhandled server error', { error: err.message, stack: err.stack });
+    logError('Unhandled server error', err);
     return res.status(500).json({ error: 'Internal server error' });
 });

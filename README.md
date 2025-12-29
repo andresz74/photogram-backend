@@ -23,6 +23,8 @@ Set environment variables as needed:
 | `MAX_FILE_SIZE_MB` | Upload limit (in MB) | `5` |
 | `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to service account JSON | falls back to `./photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json` |
 | `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name | `photograma-c2078.appspot.com` |
+| `IMAGE_PROCESSOR` | Image engine for `/resize` + `/resize-upload` (`sharp` or `jimp`) | `sharp` |
+| `FIREBASE_UPLOAD_ACL` | GCS predefined ACL for uploads (`publicRead`, etc). Set `none` to rely on bucket policy. | `publicRead` |
 
 ## Setup
 ```bash
@@ -50,3 +52,4 @@ Allowed origins are defined in `index.js` (`apps.andreszenteno.com`, localhost:3
 ## Notes
 - Only image uploads are accepted; non-image requests are rejected with `400`.
 - The service account path should be provided via `FIREBASE_SERVICE_ACCOUNT_PATH` in production to avoid keeping credentials in the repo.
+- Some very old CPUs (e.g. Atom-era netbooks) may crash when loading `sharp`/libvips (`invalid opcode` / `SIGILL`). If that happens, set `IMAGE_PROCESSOR=jimp` (higher CPU/RAM), or rebuild `sharp` on that machine against a compatible libvips.
