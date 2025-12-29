@@ -7,7 +7,6 @@ const fs = require('fs');
 const multer = require('multer');
 const os = require('os');
 const path = require('path');
-const sharp = require('sharp');
 const { pipeline } = require('stream/promises');
 const admin = require('firebase-admin');
 const { v4: uuid } = require('uuid');
@@ -172,10 +171,15 @@ const multipartSizeGuard = (req, res, next) => {
 };
 
 const bucket = admin.storage().bucket();
-const uploadAcl = (process.env.FIREBASE_UPLOAD_ACL || 'publicRead').toLowerCase();
-const usePredefinedAcl = uploadAcl !== 'none' && uploadAcl !== 'disabled';
+const uploadAcl = process.env.FIREBASE_UPLOAD_ACL || 'publicRead';
+const uploadAclLower = uploadAcl.toLowerCase();
+const usePredefinedAcl = uploadAclLower !== 'none' && uploadAclLower !== 'disabled';
 const resizeConcurrency = Number(process.env.RESIZE_CONCURRENCY || 1);
 const resizeSemaphore = createSemaphore(resizeConcurrency);
+const IMAGE_PROCESSOR = (process.env.IMAGE_PROCESSOR || 'sharp').toLowerCase(); // 'sharp' | 'jimp'
+
+const getSharp = () => require('sharp');
+const getJimp = () => require('jimp');
 
 // Health check route
 app.get('/health', defaultLimiter, (req, res) => {
@@ -204,11 +208,21 @@ app.post('/resize', heavyLimiter, multipartSizeGuard, upload.single('image'), wi
 
     try {
         res.set('Content-Type', 'image/jpeg');
-        await pipeline(
-            fs.createReadStream(req.file.path),
-            sharp().rotate().resize(1440).jpeg({ quality: 80 }),
-            res,
-        );
+        if (IMAGE_PROCESSOR === 'jimp') {
+            const Jimp = getJimp();
+            const image = await Jimp.read(req.file.path);
+            image.resize(1440, Jimp.AUTO);
+            image.quality(80);
+            const resizedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            res.send(resizedBuffer);
+        } else {
+            const sharp = getSharp();
+            await pipeline(
+                fs.createReadStream(req.file.path),
+                sharp().rotate().resize(1440).jpeg({ quality: 80 }),
+                res,
+            );
+        }
     } catch (error) {
         logError('Error resizing image', error);
         if (!res.headersSent) {
@@ -289,18 +303,34 @@ app.post('/resize-upload', heavyLimiter, multipartSizeGuard, upload.single('imag
 
         const file = bucket.file(fileName);
 
-        await pipeline(
-            fs.createReadStream(req.file.path),
-            sharp().rotate().resize(1440).jpeg({ quality: 80 }),
-            file.createWriteStream({
-                resumable: false,
-                ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
+        if (IMAGE_PROCESSOR === 'jimp') {
+            const Jimp = getJimp();
+            const image = await Jimp.read(req.file.path);
+            image.resize(1440, Jimp.AUTO);
+            image.quality(80);
+            const compressedBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+            await file.save(compressedBuffer, {
                 metadata: {
                     contentType: 'image/jpeg',
                     cacheControl: 'public,max-age=31536000,immutable',
                 },
-            }),
-        );
+                ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
+            });
+        } else {
+            const sharp = getSharp();
+            await pipeline(
+                fs.createReadStream(req.file.path),
+                sharp().rotate().resize(1440).jpeg({ quality: 80 }),
+                file.createWriteStream({
+                    resumable: false,
+                    ...(usePredefinedAcl ? { predefinedAcl: uploadAcl } : {}),
+                    metadata: {
+                        contentType: 'image/jpeg',
+                        cacheControl: 'public,max-age=31536000,immutable',
+                    },
+                }),
+            );
+        }
         log('info', 'Image uploaded to Firebase Storage', { fileName });
 
         // Get the public URL of the uploaded file
