@@ -21,10 +21,13 @@ Set environment variables as needed:
 | --- | --- | --- |
 | `PORT` | HTTP port | `3000` |
 | `MAX_FILE_SIZE_MB` | Upload limit (in MB) | `5` |
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to service account JSON | falls back to `./photograma-c2078-firebase-adminsdk-ax4wk-d70d1dfd8e.json` |
+| `LOW_MEMORY_MODE` | Memory profile mode (`auto`, `true`, `false`) used for safety caps | `auto` |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to service account JSON | **required** (no fallback) |
 | `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name | `photograma-c2078.appspot.com` |
 | `IMAGE_PROCESSOR` | Image engine for `/resize` + `/resize-upload` (`sharp` or `jimp`) | `sharp` |
 | `FIREBASE_UPLOAD_ACL` | GCS predefined ACL for uploads (`publicRead`, etc). Set `none` to rely on bucket policy. | `publicRead` |
+| `FIREBASE_URL_MODE` | Upload response URL type (`public` or `signed`) | `public` |
+| `FIREBASE_SIGNED_URL_EXPIRES_SECONDS` | Signed URL TTL in seconds (used when `FIREBASE_URL_MODE=signed`) | `900` |
 
 ## Setup
 ```bash
@@ -51,5 +54,7 @@ Allowed origins are defined in `index.js` (`apps.andreszenteno.com`, localhost:3
 
 ## Notes
 - Only image uploads are accepted; non-image requests are rejected with `400`.
-- The service account path should be provided via `FIREBASE_SERVICE_ACCOUNT_PATH` in production to avoid keeping credentials in the repo.
+- On low-memory hosts (`LOW_MEMORY_MODE=true` or auto-detected), runtime guardrails clamp `MAX_FILE_SIZE_MB` to `10` and `RESIZE_CONCURRENCY` to `1`.
+- `FIREBASE_SERVICE_ACCOUNT_PATH` is required. Do not rely on in-repo credential files.
+- For private workflows, set `FIREBASE_URL_MODE=signed` so upload endpoints return time-limited signed URLs instead of public object URLs.
 - Some very old CPUs (e.g. Atom-era netbooks) may crash when loading `sharp`/libvips (`invalid opcode` / `SIGILL`). If that happens, set `IMAGE_PROCESSOR=jimp` (higher CPU/RAM), or rebuild `sharp` on that machine against a compatible libvips.
