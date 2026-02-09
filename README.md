@@ -67,3 +67,15 @@ Allowed origins are defined in `middleware/cors.js` (`apps.andreszenteno.com`, l
 - For private workflows, set `FIREBASE_URL_MODE=signed` so upload endpoints return time-limited signed URLs instead of public object URLs.
 - `/debug` is disabled by default in production unless `ENABLE_DEBUG_ENDPOINT=true`.
 - Some very old CPUs (e.g. Atom-era netbooks) may crash when loading `sharp`/libvips (`invalid opcode` / `SIGILL`). If that happens, set `IMAGE_PROCESSOR=jimp` (higher CPU/RAM), or rebuild `sharp` on that machine against a compatible libvips.
+
+## Breaking Changes (v2.0.0)
+- `FIREBASE_SERVICE_ACCOUNT_PATH` is now required. Startup will fail if it is missing or invalid.
+- Runtime defaults now include low-memory guardrails:
+  - `LOW_MEMORY_MODE=auto` (auto-detects low-memory hosts)
+  - low-memory clamp for `MAX_FILE_SIZE_MB` (cap `10`)
+  - low-memory clamp for `RESIZE_CONCURRENCY` (cap `1`)
+- Rate limits are now configurable and guardrailed:
+  - `DEFAULT_RATE_LIMIT_MAX`
+  - `HEAVY_RATE_LIMIT_MAX` (defaults lower on low-memory hosts, with caps)
+- `/debug` endpoint behavior changed:
+  - `ENABLE_DEBUG_ENDPOINT=auto` means disabled by default in `NODE_ENV=production`.
