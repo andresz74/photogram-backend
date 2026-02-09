@@ -1,164 +1,81 @@
-# Image Upload and Management Service
+# Photogram Backend (Image Upload Service)
 
-This service provides a backend API for handling image uploads, compression, and deletion using **Firebase Storage** and **Sharp** for image processing. It also supports **CORS** for interaction with a frontend.
+Express service for resizing, uploading, and deleting images in Firebase Storage. The app is modularized into `app.js`, `routes/`, `controllers/`, `middleware/`, `config/`, and `utils/`.
 
 ## Features
-
-- Upload and compress images using `Sharp`
-- Store images in Firebase Storage
-- Delete images from Firebase Storage
-- Enable CORS to allow communication with a frontend app
+- Resize to 1440px width and compress to JPEG (quality 80) via `/resize`.
+- Upload original image to Firebase Storage via `/upload`.
+- Resize then upload via `/resize-upload`.
+- Delete images from Firebase Storage via `/delete-image`.
+- Health/debug endpoints plus size limits and a CORS allowlist.
 
 ## Prerequisites
+- Node.js 18+
+- Firebase project with Storage enabled.
+- Firebase service account JSON file available on disk.
 
-To run this service, you will need the following:
+## Configuration
+Set environment variables as needed:
 
-- **Node.js** (version 18 or higher)
-- **Firebase Admin SDK** setup
-- **Firebase Storage** bucket
+| Variable | Description | Default |
+| --- | --- | --- |
+| `PORT` | HTTP port | `3000` |
+| `MAX_FILE_SIZE_MB` | Upload limit (in MB) | `5` |
+| `RESIZE_CONCURRENCY` | Max concurrent resize jobs (guardrailed by memory profile) | `1` |
+| `LOW_MEMORY_MODE` | Memory profile mode (`auto`, `true`, `false`) used for safety caps | `auto` |
+| `DEFAULT_RATE_LIMIT_MAX` | Per-minute limit for light endpoints | `60` |
+| `HEAVY_RATE_LIMIT_MAX` | Per-minute limit for heavy endpoints (`/resize`, `/resize-upload`) | `8` on low-memory, `20` otherwise |
+| `ENABLE_DEBUG_ENDPOINT` | Enable `/debug` endpoint (`auto`, `true`, `false`) | `auto` (`false` in production) |
+| `UPLOAD_TEMP_CLEANUP_ENABLED` | Enable periodic cleanup of stale temp upload files | `true` |
+| `UPLOAD_TEMP_CLEANUP_INTERVAL_SECONDS` | Temp cleanup interval in seconds | `300` |
+| `UPLOAD_TEMP_STALE_AGE_SECONDS` | File age threshold for deletion in seconds | `900` |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to service account JSON | **required** (no fallback) |
+| `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name | `photograma-c2078.appspot.com` |
+| `IMAGE_PROCESSOR` | Image engine for `/resize` + `/resize-upload` (`sharp` or `jimp`) | `sharp` |
+| `FIREBASE_UPLOAD_ACL` | GCS predefined ACL for uploads (`publicRead`, etc). Set `none` to rely on bucket policy. | `publicRead` |
+| `FIREBASE_URL_MODE` | Upload response URL type (`public` or `signed`) | `public` |
+| `FIREBASE_SIGNED_URL_EXPIRES_SECONDS` | Signed URL TTL in seconds (used when `FIREBASE_URL_MODE=signed`) | `900` |
 
 ## Setup
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/andresz74/photogram-backend.git
-cd photogram-backend
-```
-
-### 2. Install Dependencies
-
-Run the following command to install all necessary dependencies:
-
 ```bash
 npm install
 ```
 
-### 3. Firebase Admin SDK Setup
-
-Make sure you have a Firebase project and a storage bucket set up. Create a service account in Firebase and download the credentials as a `.json` file. Place this file in your project directory.
-
-Update the Firebase Admin SDK initialization in `index.js` to use your service account file:
-
-```javascript
-const serviceAccount = require('./path-to-your-service-account.json');
-```
-
-### 4. Environment Variables
-
-You need to specify the Firebase storage bucket in your service. In the `index.js` file, make sure you update the bucket name accordingly:
-
-```javascript
-storageBucket: 'your-firebase-storage-bucket'
-```
-
-### 5. Running the Server
-
-Start the server by running:
-
+Start the server (example with PM2):
 ```bash
-npm start
+FIREBASE_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json PORT=3000 MAX_FILE_SIZE_MB=5 pm2 start index.js --name photogram-backend
 ```
 
-This will start the backend server on port `3003` by default.
+## API
+All endpoints expect `multipart/form-data` with the file field named `image` unless noted.
 
-## API Endpoints
-
-### 1. Upload an Image
-
-**Endpoint:**
-
-```
-POST /api/upload
-```
-
-**Description:**
-
-This endpoint accepts an image file and uploads it to Firebase Storage after compressing it using Sharp.
-
-**Request:**
-
-- **Headers:**
-  - `Content-Type: multipart/form-data`
-- **Body:**
-  - `image`: The image file to upload (sent as `multipart/form-data`).
-
-**Response:**
-
-- **200 OK:** If the upload is successful, the response will include the public URL of the uploaded image:
-  ```json
-  {
-    "url": "https://storage.googleapis.com/your-bucket-name/images/1234567890-image.jpg"
-  }
-  ```
-- **500 Internal Server Error:** If an error occurs during the upload.
-
-### 2. Delete an Image
-
-**Endpoint:**
-
-```
-POST /api/delete-image
-```
-
-**Description:**
-
-This endpoint deletes an image from Firebase Storage.
-
-**Request:**
-
-- **Headers:**
-  - `Content-Type: application/json`
-- **Body:**
-  ```json
-  {
-    "imgName": "image.jpg"
-  }
-  ```
-
-**Response:**
-
-- **200 OK:** If the deletion is successful.
-  ```text
-  File successfully deleted
-  ```
-- **400 Bad Request:** If the `imgName` is not provided.
-- **500 Internal Server Error:** If an error occurs during the deletion.
+- `POST /resize` — Resize/compress and return the JPEG bytes. Response `Content-Type: image/jpeg`.
+- `POST /upload` — Upload original image to Firebase Storage and return `{ url }`.
+- `POST /resize-upload` — Resize/compress, upload to Storage, and return `{ url }`.
+- `POST /delete-image` — JSON body `{ "imgName": "file-name.jpg" }` to delete from `images/` in the bucket.
+- `GET /health` — Returns `OK`.
+- `GET /debug` — Returns basic request info (IP, region).
 
 ## CORS
+Allowed origins are defined in `middleware/cors.js` (`apps.andreszenteno.com`, localhost, LAN IPs). Update `allowedOrigins` there if your frontend runs elsewhere.
 
-The service allows CORS requests from your frontend, which is specified in the CORS configuration. If your frontend is running on a different port, update the `origin` in the `CORS` middleware setup in `index.js`:
+## Notes
+- Only image uploads are accepted; non-image requests are rejected with `400`.
+- On low-memory hosts (`LOW_MEMORY_MODE=true` or auto-detected), runtime guardrails clamp `MAX_FILE_SIZE_MB` to `10` and `RESIZE_CONCURRENCY` to `1`.
+- Heavy endpoint rate limit is also clamped in low-memory mode (`HEAVY_RATE_LIMIT_MAX` cap `12`, default `8`).
+- `FIREBASE_SERVICE_ACCOUNT_PATH` is required. Do not rely on in-repo credential files.
+- For private workflows, set `FIREBASE_URL_MODE=signed` so upload endpoints return time-limited signed URLs instead of public object URLs.
+- `/debug` is disabled by default in production unless `ENABLE_DEBUG_ENDPOINT=true`.
+- Some very old CPUs (e.g. Atom-era netbooks) may crash when loading `sharp`/libvips (`invalid opcode` / `SIGILL`). If that happens, set `IMAGE_PROCESSOR=jimp` (higher CPU/RAM), or rebuild `sharp` on that machine against a compatible libvips.
 
-```javascript
-app.use(cors({
-    origin: 'http://your-frontend-url', // Update this to your frontend's URL
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
-}));
-```
-
-## File Upload Size Limits
-
-By default, this service uses **Multer** with in-memory storage to handle file uploads. You can configure limits like file size in the `Multer` middleware:
-
-```javascript
-const upload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 5 * 1024 * 1024 }  // Limit to 5MB
-});
-```
-
-## Running on a Different Port
-
-To change the port on which the server runs, update the port number in the `app.listen()` method:
-
-```javascript
-app.listen(3003, () => {
-    console.log('Server is running on port 3003');
-});
-```
-
-## License
-
-This project is licensed under the MIT License.
+## Breaking Changes (v2.0.0)
+- `FIREBASE_SERVICE_ACCOUNT_PATH` is now required. Startup will fail if it is missing or invalid.
+- Runtime defaults now include low-memory guardrails:
+  - `LOW_MEMORY_MODE=auto` (auto-detects low-memory hosts)
+  - low-memory clamp for `MAX_FILE_SIZE_MB` (cap `10`)
+  - low-memory clamp for `RESIZE_CONCURRENCY` (cap `1`)
+- Rate limits are now configurable and guardrailed:
+  - `DEFAULT_RATE_LIMIT_MAX`
+  - `HEAVY_RATE_LIMIT_MAX` (defaults lower on low-memory hosts, with caps)
+- `/debug` endpoint behavior changed:
+  - `ENABLE_DEBUG_ENDPOINT=auto` means disabled by default in `NODE_ENV=production`.
