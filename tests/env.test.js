@@ -82,3 +82,28 @@ test('env config allows higher caps when low-memory mode is disabled', () => {
 
     process.env = original;
 });
+
+test('env config clamps heavy rate limit in low-memory mode', () => {
+    const original = { ...process.env };
+    process.env.LOW_MEMORY_MODE = 'true';
+    process.env.HEAVY_RATE_LIMIT_MAX = '100';
+
+    const env = loadEnvModule();
+
+    assert.equal(env.HEAVY_RATE_LIMIT_MAX, 12);
+    assert.equal(env.HEAVY_RATE_LIMIT_WAS_CLAMPED, true);
+
+    process.env = original;
+});
+
+test('env config disables debug endpoint by default in production', () => {
+    const original = { ...process.env };
+    process.env.NODE_ENV = 'production';
+    delete process.env.ENABLE_DEBUG_ENDPOINT;
+
+    const env = loadEnvModule();
+
+    assert.equal(env.ENABLE_DEBUG_ENDPOINT, false);
+
+    process.env = original;
+});

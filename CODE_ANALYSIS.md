@@ -1,7 +1,7 @@
 # Code Analysis Summary
 
 ## Overview
-This repository is a small Express-based image service that handles image resize, upload, and delete operations against Firebase Storage. The main application logic is centralized in `index.js`, with minimal helper scripts in `test.js` and `jimp-test/test-jimp.js`.
+This repository is a small Express-based image service that handles image resize, upload, and delete operations against Firebase Storage. The runtime is modularized (`app.js`, `routes/`, `controllers/`, `middleware/`, `config/`, `utils/`) with minimal helper scripts in `test.js` and `jimp-test/test-jimp.js`.
 
 ## Production Runtime Context
 - Deployment target is a Samsung Netbook NC110 with Intel Atom CPU, 2GB RAM, 250GB SSD.
@@ -25,15 +25,17 @@ This repository is a small Express-based image service that handles image resize
 - `GET /health`: liveness check.
 - `GET /debug`: returns client IP and region.
 - `POST /resize`: accepts `image` file, resizes to width 1440, outputs JPEG bytes.
-- `POST /upload`: uploads original image to `images/` and returns URL (public or signed by config).
-- `POST /resize-upload`: resizes to JPEG, uploads, and returns URL (public or signed by config).
+- `POST /upload`: uploads original image to `images/` and returns `{ url }` (public or signed by config).
+- `POST /resize-upload`: resizes to JPEG, uploads, and returns `{ url }` (public or signed by config).
 - `POST /delete-image`: deletes `images/{imgName}` from bucket.
 
 ## Reliability and Security Controls
 - CORS allowlist with explicit trusted origins.
-- Request throttling via `express-rate-limit` (`defaultLimiter` and `heavyLimiter`).
+- Request throttling via `express-rate-limit` (`defaultLimiter` and `heavyLimiter`) with low-memory-safe heavy limit defaults/caps.
 - File size enforcement via Multer limit + pre-check middleware (`multipartSizeGuard`).
 - MIME gate for images and cleanup of temporary files in `finally` blocks.
+- Background cleanup of stale temp upload files to avoid unbounded temp-dir growth.
+- Production-safe debug posture (`/debug` disabled by default unless explicitly enabled).
 - Structured JSON logging with runtime log-level filtering.
 
 ## Key Strengths
