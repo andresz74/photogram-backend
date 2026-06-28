@@ -146,6 +146,14 @@ These compatibility routes remain preserved:
 /delete-image
 ```
 
+Legacy route behavior:
+
+- `GET /health` returns `OK`.
+- `POST /resize` resizes/compresses and returns JPEG bytes.
+- `POST /upload` uploads the original image to Firebase Storage and returns `{ url }`.
+- `POST /resize-upload` resizes/compresses, uploads to Firebase Storage, and returns `{ url }`.
+- `POST /delete-image` deletes an object from the legacy Firebase Storage `images/` path.
+
 Legacy `/upload`, `/resize-upload`, and `/delete-image` use Firebase Storage behavior and may require `FIREBASE_STORAGE_BUCKET`.
 
 ## Manual Validation
@@ -322,5 +330,8 @@ The repo ignores common local-only files, but review `git status --ignored --sho
 
 - `FIREBASE_SERVICE_ACCOUNT_PATH` is required for Firebase Auth.
 - Runtime defaults favor low-memory operation.
+- Low-memory mode clamps upload size and resize concurrency for safety.
+- Heavy endpoint rate limits are configurable and guardrailed.
 - `/debug` is disabled unless `ENABLE_DEBUG_ENDPOINT=true`.
 - Provider-backed gallery/upload/delete/archive/visibility flows now use backend APIs and SQLite/local storage in MVP mode.
+- For private workflows, use `FIREBASE_URL_MODE=signed` so legacy upload endpoints return time-limited signed URLs instead of public object URLs.
