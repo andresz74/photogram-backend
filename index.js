@@ -1,11 +1,16 @@
 require('dotenv').config();
 
-const { PORT } = require('./config/env');
 const { createApp } = require('./app');
+const { config } = require('./config/env');
+const { getBucket } = require('./config/firebase');
+const { createContainer } = require('./config/container');
+const { createProviderRegistry } = require('./config/providerRegistry');
 const { log } = require('./utils/logger');
 
-const app = createApp();
+const providerRegistry = createProviderRegistry();
+const container = createContainer(config, providerRegistry);
+const app = createApp({ container, legacyBucketGetter: getBucket });
 
-app.listen(PORT, '0.0.0.0', () => {
-    log('info', 'Server is running', { port: PORT });
+app.listen(config.port, '0.0.0.0', () => {
+    log('info', 'Server is running', { port: config.port });
 });

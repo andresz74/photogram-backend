@@ -2,7 +2,6 @@ require('dotenv').config();
 
 const express = require('express');
 
-const { bucket } = require('./config/firebase');
 const {
     LOW_MEMORY_MODE,
     MAX_FILE_SIZE_MB,
@@ -27,13 +26,15 @@ const { corsMiddleware } = require('./middleware/cors');
 const { multerErrorHandler, fallbackErrorHandler } = require('./middleware/errorHandlers');
 const { createMultipartSizeGuard } = require('./middleware/multipartSizeGuard');
 const { createRateLimiters } = require('./middleware/rateLimiters');
+const { createStaticMediaMiddleware } = require('./middleware/staticMedia');
 const { createUploadMiddleware } = require('./middleware/upload');
+const { createImageApiRoutes } = require('./routes/imageApiRoutes');
 const { createImageRouter } = require('./routes/imageRoutes');
 const { createSystemRouter } = require('./routes/systemRoutes');
 const { log } = require('./utils/logger');
 const { createSemaphore } = require('./utils/semaphore');
 
-const createApp = () => {
+const createApp = ({ container, legacyBucket, legacyBucketGetter } = {}) => {
     const app = express();
 
     log('info', 'Configured runtime limits', {
@@ -86,7 +87,8 @@ const createApp = () => {
     const resizeSemaphore = createSemaphore(RESIZE_CONCURRENCY);
 
     const imageController = createImageController({
-        bucket,
+        bucket: legacyBucket,
+        bucketGetter: legacyBucketGetter,
         imageProcessor: IMAGE_PROCESSOR,
         uploadAcl: FIREBASE_UPLOAD_ACL,
         usePredefinedAcl,
@@ -106,6 +108,29 @@ const createApp = () => {
             imageController,
         }),
     );
+
+    if (container) {
+        app.use('/images', createImageApiRoutes({
+            imageService: container.imageService,
+            imageUploadService: container.imageUploadService,
+            authProvider: container.authProvider,
+            heavyLimiter,
+            multipartSizeGuard,
+            upload,
+            resizeSemaphore,
+        }));
+    }
+
+    if (
+        container
+        && container.config
+        && container.config.storageProvider === 'local'
+        && container.storageProvider
+    ) {
+        app.use('/media', createStaticMediaMiddleware({
+            storageProvider: container.storageProvider,
+        }));
+    }
 
     app.use(multerErrorHandler);
     app.use(fallbackErrorHandler);

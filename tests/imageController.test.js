@@ -32,6 +32,15 @@ const createController = (bucketOverride = null) => {
     });
 };
 
+const createControllerWithBucketGetter = (bucketGetter) => createImageController({
+    bucketGetter,
+    imageProcessor: 'sharp',
+    uploadAcl: 'publicRead',
+    usePredefinedAcl: true,
+    urlMode: 'public',
+    signedUrlExpiresSeconds: 900,
+});
+
 test('deleteImage returns 400 when imgName is missing', async () => {
     const controller = createController();
     const req = { body: {} };
@@ -41,6 +50,21 @@ test('deleteImage returns 400 when imgName is missing', async () => {
 
     assert.equal(res.statusCode, 400);
     assert.equal(res.sent, 'Image name is required');
+});
+
+test('deleteImage does not request Firebase bucket when imgName is missing', async () => {
+    let bucketRequested = false;
+    const controller = createControllerWithBucketGetter(() => {
+        bucketRequested = true;
+        return { file: () => ({ delete: async () => {} }) };
+    });
+    const req = { body: {} };
+    const res = createMockResponse();
+
+    await controller.deleteImage(req, res);
+
+    assert.equal(bucketRequested, false);
+    assert.equal(res.statusCode, 400);
 });
 
 test('deleteImage deletes object and returns 200', async () => {
@@ -62,6 +86,30 @@ test('deleteImage deletes object and returns 200', async () => {
     assert.equal(deletedPath, 'images/abc.jpg');
     assert.equal(res.statusCode, 200);
     assert.equal(res.sent, 'File successfully deleted');
+});
+
+test('deleteImage requests Firebase bucket lazily when storage is needed', async () => {
+    let bucketRequests = 0;
+    let deletedPath = null;
+    const controller = createControllerWithBucketGetter(() => {
+        bucketRequests += 1;
+        return {
+            file: (path) => ({
+                delete: async () => {
+                    deletedPath = path;
+                },
+            }),
+        };
+    });
+
+    const req = { body: { imgName: 'lazy.jpg' } };
+    const res = createMockResponse();
+
+    await controller.deleteImage(req, res);
+
+    assert.equal(bucketRequests, 1);
+    assert.equal(deletedPath, 'images/lazy.jpg');
+    assert.equal(res.statusCode, 200);
 });
 
 test('deleteImage returns 500 when storage delete fails', async () => {
