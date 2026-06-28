@@ -1,159 +1,326 @@
-# Photogram Backend (Image Upload Service)
+# Photogram Backend
 
-Express service for resizing, uploading, deleting, and listing Photogram images. Legacy Firebase Storage endpoints remain available, and the provider-backed MVP can run with Firebase Auth, SQLite metadata, and local filesystem storage.
+Express/Firebase Admin backend for Photogram image workflows. The current provider-backed MVP keeps Firebase Auth for identity, stores image metadata in SQLite, stores processed image files on the local filesystem, and preserves legacy Firebase Storage endpoints for compatibility.
 
-## Features
-- Resize to 1440px width and compress to JPEG (quality 80) via `/resize`.
-- Upload original image to Firebase Storage via `/upload`.
-- Resize then upload via `/resize-upload`.
-- Delete images from Firebase Storage via `/delete-image`.
-- Provider-backed image API at `/images/*` for local MVP mode.
-- Public local media serving at `/media/*` when `STORAGE_PROVIDER=local`.
-- Health/debug endpoints plus size limits and a CORS allowlist.
+Current MVP provider mode:
 
-## Prerequisites
-- Node.js 18+
-- Firebase project with Storage enabled.
-- Firebase service account JSON file available on disk.
+```env
+AUTH_PROVIDER=firebase
+DATABASE_PROVIDER=sqlite
+STORAGE_PROVIDER=local
+```
 
-## Configuration
-Set environment variables as needed:
+Firebase Auth verifies ID tokens. SQLite stores normalized image metadata. Local storage keeps processed image files under `LOCAL_STORAGE_ROOT`. Firebase Storage is no longer required for local-storage MVP startup, but legacy Firebase Storage routes still work when bucket config is provided.
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `PORT` | HTTP port | `3000` |
-| `AUTH_PROVIDER` | Auth provider (`firebase` or future `local`) | `firebase` |
-| `DATABASE_PROVIDER` | Metadata provider (`sqlite` or future `firebase`) | `sqlite` |
-| `STORAGE_PROVIDER` | Image storage provider (`local` or future `firebase`) | `local` |
-| `SQLITE_PATH` | SQLite metadata database path for local MVP mode | `./data/photogram.sqlite` |
-| `LOCAL_STORAGE_ROOT` | Local image storage root | `./data/images` |
-| `PUBLIC_MEDIA_BASE_URL` | Public URL base for local media URLs | `http://localhost:3000/media` |
-| `MAX_FILE_SIZE_MB` | Upload limit (in MB) | `5` |
-| `RESIZE_CONCURRENCY` | Max concurrent resize jobs (guardrailed by memory profile) | `1` |
-| `LOW_MEMORY_MODE` | Memory profile mode (`true` or `false`) used for safety caps | `true` |
-| `DEFAULT_RATE_LIMIT_MAX` | Per-minute limit for light endpoints | `60` |
-| `HEAVY_RATE_LIMIT_MAX` | Per-minute limit for heavy endpoints (`/resize`, `/resize-upload`, `POST /images`) | `8` |
-| `ENABLE_DEBUG_ENDPOINT` | Enable `/debug` endpoint (`true` or `false`) | `false` |
-| `UPLOAD_TEMP_CLEANUP_ENABLED` | Enable periodic cleanup of stale temp upload files | `true` |
-| `UPLOAD_TEMP_CLEANUP_INTERVAL_SECONDS` | Temp cleanup interval in seconds | `300` |
-| `UPLOAD_TEMP_STALE_AGE_SECONDS` | File age threshold for deletion in seconds | `900` |
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path to service account JSON | **required** (no fallback) |
-| `FIREBASE_STORAGE_BUCKET` | Firebase Storage bucket name; required when `STORAGE_PROVIDER=firebase` | none |
-| `IMAGE_PROCESSOR` | Image engine for `/resize` + `/resize-upload` (`sharp` or `jimp`) | `sharp` |
-| `FIREBASE_UPLOAD_ACL` | GCS predefined ACL for uploads (`publicRead`, etc). Set `none` to rely on bucket policy. | `publicRead` |
-| `FIREBASE_URL_MODE` | Upload response URL type (`public` or `signed`) | `signed` |
-| `FIREBASE_SIGNED_URL_EXPIRES_SECONDS` | Signed URL TTL in seconds (used when `FIREBASE_URL_MODE=signed`) | `300` |
+## Architecture
 
-## Provider-Backed MVP Mode
-Use this mode for the current Samsung NC110 target while keeping Firebase Auth:
+```text
+Frontend
+  -> Photogram backend API
+      -> Firebase Auth provider
+      -> SQLite image repository
+      -> local filesystem storage provider
+      -> image processor
+```
+
+Provider selection is centralized in:
+
+```text
+config/env.js
+config/container.js
+config/providerRegistry.js
+```
+
+Controllers, routes, and services should receive dependencies from the container. They should not branch on provider env values or dynamically load provider modules from env variables.
+
+More detail:
+
+- `docs/photogram-provider-agnostic-system-spec.md`
+- `docs/photogram-mvp-implementation-plan.md`
+- `docs/backend-mvp-validation.md`
+
+## Environment Variables
+
+Local MVP `.env` example, using backend port `3003`:
+
+```env
+NODE_ENV=development
+PORT=3003
+
+AUTH_PROVIDER=firebase
+DATABASE_PROVIDER=sqlite
+STORAGE_PROVIDER=local
+
+FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/firebase-service-account.json
+
+SQLITE_PATH=./data/photogram.sqlite
+LOCAL_STORAGE_ROOT=./data/images
+PUBLIC_MEDIA_BASE_URL=http://localhost:3003/media
+
+LOW_MEMORY_MODE=true
+IMAGE_PROCESSOR=jimp
+MAX_FILE_SIZE_MB=5
+RESIZE_CONCURRENCY=1
+HEAVY_RATE_LIMIT_MAX=8
+ENABLE_DEBUG_ENDPOINT=false
+
+FIREBASE_URL_MODE=signed
+FIREBASE_SIGNED_URL_EXPIRES_SECONDS=120
+```
+
+Notes:
+
+- `FIREBASE_SERVICE_ACCOUNT_PATH` must point to a real Firebase service-account JSON file outside this repo.
+- Do not commit service-account JSON files or `.env`.
+- `SQLITE_PATH` and `LOCAL_STORAGE_ROOT` must be backed up together.
+- `PUBLIC_MEDIA_BASE_URL` must match the backend URL used by clients.
+- `IMAGE_PROCESSOR=jimp` is the safer NC110 fallback if `sharp` has native or CPU compatibility issues.
+- `FIREBASE_STORAGE_BUCKET` is needed only for legacy Firebase Storage behavior or future Firebase storage mode, not for local-storage MVP startup.
+- If you set `FIREBASE_STORAGE_BUCKET`, use the bucket name only. Do not include `gs://`.
+
+## Install And Run
 
 ```bash
+npm install
+npm test
+npm start
+```
+
+One-shot local MVP run:
+
+```bash
+PORT=3003 \
 AUTH_PROVIDER=firebase \
 DATABASE_PROVIDER=sqlite \
 STORAGE_PROVIDER=local \
 SQLITE_PATH=./data/photogram.sqlite \
 LOCAL_STORAGE_ROOT=./data/images \
-PUBLIC_MEDIA_BASE_URL=http://localhost:3000/media \
-FIREBASE_SERVICE_ACCOUNT_PATH=/secure/photogram/firebase-service-account.json \
+PUBLIC_MEDIA_BASE_URL=http://localhost:3003/media \
+FIREBASE_SERVICE_ACCOUNT_PATH=/absolute/path/to/firebase-service-account.json \
 LOW_MEMORY_MODE=true \
+IMAGE_PROCESSOR=jimp \
 MAX_FILE_SIZE_MB=5 \
 RESIZE_CONCURRENCY=1 \
 HEAVY_RATE_LIMIT_MAX=8 \
 ENABLE_DEBUG_ENDPOINT=false \
-IMAGE_PROCESSOR=sharp \
 npm start
 ```
 
-Canonical provider-backed routes:
+## Canonical API Routes
 
-- `GET /images/public`
-- `GET /images/me`
-- `POST /images`
-- `DELETE /images/:imageId`
-- `PATCH /images/:imageId/visibility`
-- `POST /images/:imageId/archive`
-- `POST /images/:imageId/unarchive`
-- `GET /media/*`
+Provider-backed routes:
 
-Quick validation:
+```text
+GET    /images/public
+GET    /images/me
+POST   /images
+DELETE /images/:imageId
+PATCH  /images/:imageId/visibility
+POST   /images/:imageId/archive
+POST   /images/:imageId/unarchive
+GET    /media/*
+```
+
+Auth requirements:
+
+- `GET /images/public` — no auth; lists public, non-archived image DTOs.
+- `GET /images/me` — Firebase ID token required; lists current user's images. Supports `?archived=true` and `?includeArchived=true`.
+- `POST /images` — Firebase ID token required; uploads one image using multipart field `image`.
+- `DELETE /images/:imageId` — Firebase ID token required; deletes owned storage objects and soft-deletes metadata.
+- `PATCH /images/:imageId/visibility` — Firebase ID token required; updates `isPublic` for an owned image.
+- `POST /images/:imageId/archive` — Firebase ID token required; archives an owned image without deleting files.
+- `POST /images/:imageId/unarchive` — Firebase ID token required; restores an archived owned image.
+- `GET /media/*` — public local media serving when `STORAGE_PROVIDER=local`.
+
+DTO responses intentionally hide provider internals such as `storageKey`, `thumbnailKey`, filesystem paths, bucket names, and signed URL internals.
+
+## Legacy Routes
+
+These compatibility routes remain preserved:
+
+```text
+/health
+/resize
+/upload
+/resize-upload
+/delete-image
+```
+
+Legacy `/upload`, `/resize-upload`, and `/delete-image` use Firebase Storage behavior and may require `FIREBASE_STORAGE_BUCKET`.
+
+## Manual Validation
+
+Health:
 
 ```bash
-npm install
-npm test
-node --check index.js
-node --check app.js
+curl http://localhost:3003/health
+```
 
-curl http://localhost:3000/health
-curl http://localhost:3000/images/public
-curl -H "Authorization: Bearer <firebase-id-token>" http://localhost:3000/images/me
-curl -X POST -H "Authorization: Bearer <firebase-id-token>" \
+Public gallery:
+
+```bash
+curl http://localhost:3003/images/public
+```
+
+User gallery:
+
+```bash
+curl -H "Authorization: Bearer <firebase-id-token>" \
+  http://localhost:3003/images/me
+```
+
+Upload:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <firebase-id-token>" \
   -F "image=@/path/to/photo.jpg" \
   -F "description=Provider-backed upload" \
   -F "isPublic=true" \
-  http://localhost:3000/images
-curl -X DELETE -H "Authorization: Bearer <firebase-id-token>" \
-  http://localhost:3000/images/<image-id>
-curl -X PATCH -H "Authorization: Bearer <firebase-id-token>" \
+  http://localhost:3003/images
+```
+
+Hide or show:
+
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer <firebase-id-token>" \
   -H "Content-Type: application/json" \
   -d '{"isPublic":false}' \
-  http://localhost:3000/images/<image-id>/visibility
-curl -X POST -H "Authorization: Bearer <firebase-id-token>" \
-  http://localhost:3000/images/<image-id>/archive
-curl -X POST -H "Authorization: Bearer <firebase-id-token>" \
-  http://localhost:3000/images/<image-id>/unarchive
-curl http://localhost:3000/media/users/<uid>/images/<image-id>.jpg
+  http://localhost:3003/images/<image-id>/visibility
+```
+
+Archive:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <firebase-id-token>" \
+  http://localhost:3003/images/<image-id>/archive
+```
+
+Archived view:
+
+```bash
+curl -H "Authorization: Bearer <firebase-id-token>" \
+  "http://localhost:3003/images/me?archived=true"
+```
+
+Unarchive:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <firebase-id-token>" \
+  http://localhost:3003/images/<image-id>/unarchive
+```
+
+Delete:
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <firebase-id-token>" \
+  http://localhost:3003/images/<image-id>
+```
+
+Media:
+
+```bash
+curl http://localhost:3003/media/users/<uid>/images/<image-id>.jpg
+```
+
+Legacy upload check:
+
+```bash
+curl -X POST \
+  -F "image=@/path/to/photo.jpg" \
+  http://localhost:3003/resize-upload
 ```
 
 Upload edge cases to validate before deployment: valid image, non-image file, empty payload, and oversize payload using `MAX_FILE_SIZE_MB`.
 
-## Setup
-```bash
-npm install
-```
-
-Start the server (example with PM2):
-```bash
-FIREBASE_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json PORT=3000 MAX_FILE_SIZE_MB=5 pm2 start index.js --name photogram-backend
-```
-
-## API
-All endpoints expect `multipart/form-data` with the file field named `image` unless noted.
-
-- `POST /resize` — Resize/compress and return the JPEG bytes. Response `Content-Type: image/jpeg`.
-- `POST /upload` — Upload original image to Firebase Storage and return `{ url }`.
-- `POST /resize-upload` — Resize/compress, upload to Storage, and return `{ url }`.
-- `POST /delete-image` — JSON body `{ "imgName": "file-name.jpg" }` to delete from `images/` in the bucket.
-- `GET /images/public` — List public provider-backed image DTOs.
-- `GET /images/me` — List authenticated user's provider-backed image DTOs.
-- `POST /images` — Authenticated provider-backed upload using the `image` form field.
-- `DELETE /images/:imageId` — Authenticated provider-backed delete.
-- `PATCH /images/:imageId/visibility` — Authenticated owner visibility update.
-- `POST /images/:imageId/archive` — Authenticated owner archive action.
-- `POST /images/:imageId/unarchive` — Authenticated owner unarchive action.
-- `GET /media/*` — Serve local media only when local storage is selected.
-- `GET /health` — Returns `OK`.
-- `GET /debug` — Returns basic request info (IP, region).
-
 ## CORS
-Allowed origins are defined in `middleware/cors.js` (`apps.andreszenteno.com`, localhost, LAN IPs). Update `allowedOrigins` there if your frontend runs elsewhere.
 
-## Notes
-- Only image uploads are accepted; non-image requests are rejected with `400`.
-- On low-memory hosts (`LOW_MEMORY_MODE=true`), runtime guardrails clamp `MAX_FILE_SIZE_MB` to `10` and `RESIZE_CONCURRENCY` to `1`.
-- Heavy endpoint rate limit is also clamped in low-memory mode (`HEAVY_RATE_LIMIT_MAX` cap `12`, default `8`).
-- `FIREBASE_SERVICE_ACCOUNT_PATH` is required. Do not rely on in-repo credential files.
-- For private workflows, set `FIREBASE_URL_MODE=signed` so upload endpoints return time-limited signed URLs instead of public object URLs.
-- `/debug` is disabled by default unless `ENABLE_DEBUG_ENDPOINT=true`.
-- Some very old CPUs (e.g. Atom-era netbooks) may crash when loading `sharp`/libvips (`invalid opcode` / `SIGILL`). If that happens, set `IMAGE_PROCESSOR=jimp` (higher CPU/RAM), or rebuild `sharp` on that machine against a compatible libvips.
+Local frontend origins should be allowed:
 
-## Breaking Changes (v2.0.0)
-- `FIREBASE_SERVICE_ACCOUNT_PATH` is now required. Startup will fail if it is missing or invalid.
-- Runtime defaults now include low-memory guardrails:
-  - `LOW_MEMORY_MODE=true`
-  - low-memory clamp for `MAX_FILE_SIZE_MB` (cap `10`)
-  - low-memory clamp for `RESIZE_CONCURRENCY` (cap `1`)
-- Rate limits are now configurable and guardrailed:
-  - `DEFAULT_RATE_LIMIT_MAX`
-  - `HEAVY_RATE_LIMIT_MAX` (defaults lower on low-memory hosts, with caps)
-- `/debug` endpoint behavior changed:
-  - `ENABLE_DEBUG_ENDPOINT=false` disables it unless explicitly enabled.
+```text
+http://localhost:3000
+http://127.0.0.1:3000
+```
+
+CORS methods must include:
+
+```text
+GET,POST,PATCH,DELETE,OPTIONS,HEAD
+```
+
+CORS headers must include:
+
+```text
+Content-Type,Authorization
+```
+
+Preflight check:
+
+```bash
+curl -i -X OPTIONS \
+  'http://localhost:3003/images/test-image-id/visibility' \
+  -H 'Origin: http://localhost:3000' \
+  -H 'Access-Control-Request-Method: PATCH' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'
+```
+
+Allowed origins and methods are configured in `middleware/cors.js`.
+
+## NC110 Deployment Notes
+
+- Run the service under PM2, for example `pm2 start index.js --name photogram-backend`.
+- Keep `LOW_MEMORY_MODE=true`.
+- Keep `RESIZE_CONCURRENCY=1`.
+- Prefer `IMAGE_PROCESSOR=jimp` if `sharp` is unstable on the Atom CPU.
+- Keep `MAX_FILE_SIZE_MB=5` unless the host has been tested under load.
+- Verify with `pm2 status` and `pm2 logs photogram-backend` after deployment.
+- Back up the SQLite DB and local image directory together.
+- Keep the Firebase service-account JSON outside the repo.
+- Consider Nginx/Caddy for `/media` later if traffic grows beyond low-volume use.
+
+## Testing
+
+```bash
+npm test
+```
+
+Current test coverage includes:
+
+- env parsing
+- provider container
+- Firebase Auth provider
+- SQLite repository
+- local storage provider
+- image presenter, image service, and upload service
+- canonical image routes
+- static media
+- CORS
+- legacy route preservation
+
+## Safety
+
+Do not commit:
+
+```text
+.env
+secrets/
+service-account JSON
+data/
+SQLite DB files
+uploaded images
+node_modules/
+firebase-debug.log
+```
+
+The repo ignores common local-only files, but review `git status --ignored --short` before committing deployment changes.
+
+## Breaking Changes Since v2.0.0
+
+- `FIREBASE_SERVICE_ACCOUNT_PATH` is required for Firebase Auth.
+- Runtime defaults favor low-memory operation.
+- `/debug` is disabled unless `ENABLE_DEBUG_ENDPOINT=true`.
+- Provider-backed gallery/upload/delete/archive/visibility flows now use backend APIs and SQLite/local storage in MVP mode.
