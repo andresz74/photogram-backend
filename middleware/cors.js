@@ -10,6 +10,9 @@ const allowedOrigins = new Set([
     'https://photogram.andreszenteno.com',
 ]);
 
+const allowedMethods = ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
+const allowedHeaders = ['Content-Type', 'Authorization'];
+
 const corsMiddleware = cors({
     origin: (origin, callback) => {
         if (!origin || allowedOrigins.has(origin)) {
@@ -18,9 +21,14 @@ const corsMiddleware = cors({
             callback(new Error('Not allowed by CORS'));
         }
     },
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: allowedMethods,
+    allowedHeaders,
     credentials: true,
 });
 
-module.exports = { corsMiddleware, allowedOrigins };
+module.exports = {
+    corsMiddleware,
+    allowedOrigins,
+    allowedMethods,
+    allowedHeaders,
+};
