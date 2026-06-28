@@ -31,12 +31,20 @@ const hasValidImageFile = (req, res, invalidMimetypeMessage = 'Uploaded file is 
 
 const createImageController = ({
     bucket,
+    bucketGetter,
     imageProcessor,
     uploadAcl,
     usePredefinedAcl,
     urlMode,
     signedUrlExpiresSeconds,
 }) => {
+    const getLegacyBucket = () => {
+        if (bucketGetter) {
+            return bucketGetter();
+        }
+        return bucket;
+    };
+
     const resize = async (req, res) => {
         if (!hasValidImageFile(req, res)) return;
 
@@ -85,7 +93,8 @@ const createImageController = ({
             };
             const ext = mimeToExt[mime] || 'bin';
             const fileName = `images/${uuid()}.${ext}`;
-            const file = bucket.file(fileName);
+            const legacyBucket = getLegacyBucket();
+            const file = legacyBucket.file(fileName);
 
             await pipeline(
                 fs.createReadStream(req.file.path),
@@ -101,7 +110,7 @@ const createImageController = ({
 
             const url = await resolveStorageUrl({
                 file,
-                bucketName: bucket.name,
+                bucketName: legacyBucket.name,
                 fileName,
                 urlMode,
                 signedUrlExpiresSeconds,
@@ -125,7 +134,8 @@ const createImageController = ({
             const fileName = `images/${uuid()}.jpg`;
             log('info', 'Uploading resized image', { fileName });
 
-            const file = bucket.file(fileName);
+            const legacyBucket = getLegacyBucket();
+            const file = legacyBucket.file(fileName);
 
             if (imageProcessor === 'jimp') {
                 const Jimp = getJimp();
@@ -161,7 +171,7 @@ const createImageController = ({
 
             const url = await resolveStorageUrl({
                 file,
-                bucketName: bucket.name,
+                bucketName: legacyBucket.name,
                 fileName,
                 urlMode,
                 signedUrlExpiresSeconds,
@@ -187,7 +197,8 @@ const createImageController = ({
                 return res.status(400).send('Image name is required');
             }
 
-            const file = bucket.file(`images/${imgName}`);
+            const legacyBucket = getLegacyBucket();
+            const file = legacyBucket.file(`images/${imgName}`);
             await file.delete();
             log('info', 'File deleted from Firebase Storage', { imgName });
 
