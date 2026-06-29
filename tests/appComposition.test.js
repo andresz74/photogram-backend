@@ -119,6 +119,7 @@ const createFakeContainer = (overrides = {}) => {
         calls,
         config: {
             storageProvider: overrides.storageProviderName || 'firebase',
+            trustProxy: overrides.trustProxy || false,
         },
         storageProvider: fakeStorageProvider,
         authProvider: fakeAuthProvider,
@@ -184,6 +185,24 @@ test('createApp({ container }) creates an Express app', () => {
 
     assert.equal(typeof app, 'function');
     assert.equal(typeof app.use, 'function');
+});
+
+test('createApp sets Express trust proxy when container.config.trustProxy is provided', () => {
+    const createApp = getCreateApp();
+    const app = createApp({
+        container: createFakeContainer({
+            trustProxy: 'loopback',
+        }),
+    });
+
+    assert.equal(app.get('trust proxy'), 'loopback');
+});
+
+test('createApp does not set trust proxy when disabled', () => {
+    const createApp = getCreateApp();
+    const app = createApp({ container: createFakeContainer() });
+
+    assert.equal(app.get('trust proxy'), false);
 });
 
 test('mounted app responds to GET /images/public', async () => {
@@ -546,6 +565,18 @@ test('existing health route still works', async () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.body, 'OK');
+});
+
+test('existing rate-limit behavior remains enabled', async () => {
+    const app = getCreateApp()({ container: createFakeContainer() });
+
+    const response = await request(app, { path: '/health' });
+
+    assert.equal(Boolean(
+        response.headers['ratelimit-limit']
+            || response.headers.ratelimit
+            || response.headers['ratelimit-policy'],
+    ), true);
 });
 
 test('legacy route modules are not removed', () => {

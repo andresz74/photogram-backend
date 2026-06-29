@@ -63,6 +63,7 @@ MAX_FILE_SIZE_MB=5
 RESIZE_CONCURRENCY=1
 HEAVY_RATE_LIMIT_MAX=8
 ENABLE_DEBUG_ENDPOINT=false
+TRUST_PROXY=loopback
 
 FIREBASE_URL_MODE=signed
 FIREBASE_SIGNED_URL_EXPIRES_SECONDS=120
@@ -77,6 +78,9 @@ Notes:
 - `IMAGE_PROCESSOR=jimp` is the safer NC110 fallback if `sharp` has native or CPU compatibility issues.
 - `FIREBASE_STORAGE_BUCKET` is needed only for legacy Firebase Storage behavior or future Firebase storage mode, not for local-storage MVP startup.
 - If you set `FIREBASE_STORAGE_BUCKET`, use the bucket name only. Do not include `gs://`.
+- Use `TRUST_PROXY=loopback` when Nginx/Caddy runs on the same host as Node.
+- Use `TRUST_PROXY=1` or a specific trusted proxy/subnet only when that matches the deployment topology.
+- Do not expose the Node port directly to the internet if relying on proxy headers.
 
 ## Install And Run
 
@@ -103,6 +107,7 @@ MAX_FILE_SIZE_MB=5 \
 RESIZE_CONCURRENCY=1 \
 HEAVY_RATE_LIMIT_MAX=8 \
 ENABLE_DEBUG_ENDPOINT=false \
+TRUST_PROXY=loopback \
 npm start
 ```
 
@@ -285,6 +290,7 @@ Allowed origins and methods are configured in `middleware/cors.js`.
 - Keep `RESIZE_CONCURRENCY=1`.
 - Prefer `IMAGE_PROCESSOR=jimp` if `sharp` is unstable on the Atom CPU.
 - Keep `MAX_FILE_SIZE_MB=5` unless the host has been tested under load.
+- Set `TRUST_PROXY=loopback` when the reverse proxy runs on the same host.
 - Verify with `pm2 status` and `pm2 logs photogram-backend` after deployment.
 - Back up the SQLite DB and local image directory together.
 - Keep the Firebase service-account JSON outside the repo.

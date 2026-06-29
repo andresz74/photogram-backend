@@ -20,6 +20,7 @@ const DEFAULTS = {
     UPLOAD_TEMP_CLEANUP_INTERVAL_SECONDS: '300',
     UPLOAD_TEMP_STALE_AGE_SECONDS: '900',
     FIREBASE_UPLOAD_ACL: 'publicRead',
+    TRUST_PROXY: 'false',
 };
 
 const AUTH_PROVIDERS = new Set(['firebase', 'local']);
@@ -27,6 +28,7 @@ const DATABASE_PROVIDERS = new Set(['firebase', 'sqlite']);
 const STORAGE_PROVIDERS = new Set(['firebase', 'local']);
 const IMAGE_PROCESSORS = new Set(['sharp', 'jimp']);
 const FIREBASE_URL_MODES = new Set(['public', 'signed']);
+const TRUST_PROXY_NAMES = new Set(['loopback', 'linklocal', 'uniquelocal']);
 
 const LOW_MEMORY_MAX_FILE_SIZE_MB = 10;
 const STANDARD_MAX_FILE_SIZE_MB = 25;
@@ -73,6 +75,24 @@ const parsePositiveInteger = (source, envName) => {
         throw new Error(`${envName} must be a positive integer.`);
     }
     return value;
+};
+
+const parseTrustProxy = (source) => {
+    const raw = readValue(source, 'TRUST_PROXY').trim().toLowerCase();
+
+    if (raw === '' || raw === 'false') {
+        return false;
+    }
+
+    if (TRUST_PROXY_NAMES.has(raw)) {
+        return raw;
+    }
+
+    if (/^[1-9]\d*$/.test(raw)) {
+        return Number(raw);
+    }
+
+    throw new Error('TRUST_PROXY must be false, loopback, linklocal, uniquelocal, or a positive integer.');
 };
 
 const clamp = (value, max) => Math.min(value, max);
@@ -128,6 +148,7 @@ const readEnv = (source = process.env) => {
     const uploadTempCleanupIntervalSeconds = parsePositiveInteger(source, 'UPLOAD_TEMP_CLEANUP_INTERVAL_SECONDS');
     const uploadTempStaleAgeSeconds = parsePositiveInteger(source, 'UPLOAD_TEMP_STALE_AGE_SECONDS');
     const firebaseUploadAcl = readValue(source, 'FIREBASE_UPLOAD_ACL');
+    const trustProxy = parseTrustProxy(source);
 
     return {
         nodeEnv,
@@ -157,6 +178,7 @@ const readEnv = (source = process.env) => {
         uploadTempCleanupIntervalSeconds,
         uploadTempStaleAgeSeconds,
         firebaseUploadAcl,
+        trustProxy,
     };
 };
 
@@ -184,5 +206,6 @@ module.exports = {
     FIREBASE_UPLOAD_ACL: config.firebaseUploadAcl,
     FIREBASE_URL_MODE: config.firebaseUrlMode,
     FIREBASE_SIGNED_URL_EXPIRES_SECONDS: config.firebaseSignedUrlExpiresSeconds,
+    TRUST_PROXY: config.trustProxy,
     PORT: config.port,
 };

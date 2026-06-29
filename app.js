@@ -36,6 +36,13 @@ const { createSemaphore } = require('./utils/semaphore');
 
 const createApp = ({ container, legacyBucket, legacyBucketGetter } = {}) => {
     const app = express();
+    const trustProxy = container && container.config
+        ? container.config.trustProxy
+        : false;
+
+    if (trustProxy) {
+        app.set('trust proxy', trustProxy);
+    }
 
     log('info', 'Configured runtime limits', {
         lowMemoryMode: LOW_MEMORY_MODE,

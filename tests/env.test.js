@@ -103,6 +103,48 @@ test('parses numeric values', () => {
     assert.equal(config.heavyRateLimitMax, 11);
 });
 
+test('defaults trustProxy to disabled', () => {
+    const config = readEnv(baseEnv);
+
+    assert.equal(config.trustProxy, false);
+});
+
+test('parses TRUST_PROXY=loopback', () => {
+    const config = readEnv(withEnv({ TRUST_PROXY: 'loopback' }));
+
+    assert.equal(config.trustProxy, 'loopback');
+});
+
+test('parses TRUST_PROXY=linklocal', () => {
+    const config = readEnv(withEnv({ TRUST_PROXY: 'linklocal' }));
+
+    assert.equal(config.trustProxy, 'linklocal');
+});
+
+test('parses TRUST_PROXY=uniquelocal', () => {
+    const config = readEnv(withEnv({ TRUST_PROXY: 'uniquelocal' }));
+
+    assert.equal(config.trustProxy, 'uniquelocal');
+});
+
+test('parses TRUST_PROXY=1 as number 1', () => {
+    const config = readEnv(withEnv({ TRUST_PROXY: '1' }));
+
+    assert.equal(config.trustProxy, 1);
+});
+
+test('parses TRUST_PROXY=false as disabled', () => {
+    const config = readEnv(withEnv({ TRUST_PROXY: 'false' }));
+
+    assert.equal(config.trustProxy, false);
+});
+
+test('rejects invalid TRUST_PROXY values', () => {
+    assertEnvError(withEnv({ TRUST_PROXY: 'true' }), 'TRUST_PROXY');
+    assertEnvError(withEnv({ TRUST_PROXY: '0' }), 'TRUST_PROXY');
+    assertEnvError(withEnv({ TRUST_PROXY: 'internet' }), 'TRUST_PROXY');
+});
+
 test('rejects invalid numeric values', () => {
     assertEnvError(withEnv({ PORT: '0' }), 'PORT');
     assertEnvError(withEnv({ FIREBASE_SIGNED_URL_EXPIRES_SECONDS: '-1' }), 'FIREBASE_SIGNED_URL_EXPIRES_SECONDS');
@@ -160,6 +202,7 @@ test('returned config uses camelCase property names', () => {
     assert.equal(Object.prototype.hasOwnProperty.call(config, 'nodeEnv'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(config, 'authProvider'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(config, 'firebaseServiceAccountPath'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(config, 'trustProxy'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(config, 'AUTH_PROVIDER'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(config, 'FIREBASE_SERVICE_ACCOUNT_PATH'), false);
 });
