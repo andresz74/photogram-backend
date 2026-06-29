@@ -21,12 +21,25 @@
 - Example local run with env overrides:
   `PORT=3000 MAX_FILE_SIZE_MB=5 IMAGE_PROCESSOR=sharp npm start`
 
+## Provider-Backed MVP Architecture
+- Default MVP mode: `AUTH_PROVIDER=firebase`, `DATABASE_PROVIDER=sqlite`, `STORAGE_PROVIDER=local`.
+- Firebase Auth verifies ID tokens; SQLite stores image metadata; local filesystem storage keeps processed image files.
+- Firebase Storage endpoints remain compatibility paths for `/upload`, `/resize-upload`, and `/delete-image`.
+- Provider selection belongs in `config/env.js`, `config/container.js`, and `config/providerRegistry.js`.
+- Controllers, routes, and services must not branch on provider env values or import concrete Firebase, SQLite, or local-storage providers directly.
+- Canonical provider-backed routes: `GET /images/public`, `GET /images/me`, `POST /images`, `DELETE /images/:imageId`, `PATCH /images/:imageId/visibility`, `POST /images/:imageId/archive`, `POST /images/:imageId/unarchive`, and `GET /media/*`.
+- Preserve legacy routes: `/health`, `/resize`, `/upload`, `/resize-upload`, and `/delete-image`.
+- DTOs must not expose `storageKey`, `thumbnailKey`, filesystem paths, Firebase bucket names, or other provider internals.
+
 ## Deployment Environment Constraints
 - Production host: Samsung Netbook NC110 running Ubuntu Server 24.04.3 LTS.
 - Hardware profile: Intel Atom CPU, 2GB RAM, 250GB SSD.
 - Process manager: PM2 (the API is expected to run as a managed PM2 process).
 - Favor low-memory/low-CPU changes: stream I/O, avoid loading large buffers, and keep dependencies lightweight.
+- Keep `LOW_MEMORY_MODE=true`, `RESIZE_CONCURRENCY=1`, and `MAX_FILE_SIZE_MB=5` unless the target host has been load-tested.
 - Validate processor choice (`IMAGE_PROCESSOR=sharp|jimp`) on target hardware before release; Atom-class CPUs may require fallback to `jimp`.
+- Use `TRUST_PROXY=loopback` when the NC110 is behind a same-host Nginx/Caddy reverse proxy.
+- CORS methods must include `GET,POST,PATCH,DELETE,OPTIONS,HEAD` for canonical image metadata actions.
 - Verify PM2 behavior after changes (`pm2 status`, `pm2 logs photogram-backend`) and keep startup commands documented in PRs when process settings change.
 
 ## Coding Style & Naming Conventions
@@ -51,5 +64,7 @@
 
 ## Security & Configuration Tips
 - Do not commit real secrets. `FIREBASE_SERVICE_ACCOUNT_PATH` is required; keep service account JSON outside the repository.
+- Do not commit `.env`, `secrets/`, service-account JSON, `data/`, SQLite DB files, uploaded images, `firebase-debug.log`, or `node_modules/`.
+- Back up the SQLite DB and `LOCAL_STORAGE_ROOT` together; metadata and files are a matched set.
 - For non-public buckets/private access, use `FIREBASE_URL_MODE=signed` and set `FIREBASE_SIGNED_URL_EXPIRES_SECONDS` to the shortest practical TTL.
 - Review CORS allowlist updates carefully in `index.js` and document any new origins in the PR.
