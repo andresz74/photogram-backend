@@ -130,7 +130,7 @@ Auth requirements:
 
 - `GET /images/public` — no auth; lists public, non-archived image DTOs.
 - `GET /images/me` — Firebase ID token required; lists current user's images. Supports `?archived=true` and `?includeArchived=true`.
-- `POST /images` — Firebase ID token required; uploads one image using multipart field `image`.
+- `POST /images` — Firebase ID token required; uploads one image using multipart field `image`. Optional `tags` must be a JSON array string.
 - `DELETE /images/:imageId` — Firebase ID token required; deletes owned storage objects and soft-deletes metadata.
 - `PATCH /images/:imageId/visibility` — Firebase ID token required; updates `isPublic` for an owned image.
 - `POST /images/:imageId/archive` — Firebase ID token required; archives an owned image without deleting files.
@@ -138,6 +138,7 @@ Auth requirements:
 - `GET /media/*` — public local media serving when `STORAGE_PROVIDER=local`.
 
 DTO responses intentionally hide provider internals such as `storageKey`, `thumbnailKey`, filesystem paths, bucket names, and signed URL internals.
+Tagged image DTOs include `tags` and `tagSlugs`; untagged images return empty arrays for both fields.
 
 ## Legacy Routes
 
@@ -190,6 +191,7 @@ curl -X POST \
   -F "image=@/path/to/photo.jpg" \
   -F "description=Provider-backed upload" \
   -F "isPublic=true" \
+  -F 'tags=["dog","golden retriever","New York"]' \
   http://localhost:3003/images
 ```
 

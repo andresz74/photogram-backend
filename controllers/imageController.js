@@ -4,6 +4,7 @@ const { v4: uuid } = require('uuid');
 
 const { log, logError } = require('../utils/logger');
 const { resolveStorageUrl } = require('../utils/storageUrl');
+const { normalizeTags } = require('../utils/tags');
 
 const getSharp = () => require('sharp');
 const getJimp = () => require('jimp');
@@ -27,6 +28,14 @@ const hasValidImageFile = (req, res, invalidMimetypeMessage = 'Uploaded file is 
         return false;
     }
     return true;
+};
+
+const sendValidationError = (res, error) => {
+    if (error && error.statusCode === 400) {
+        res.status(400).json({ error: error.message });
+        return true;
+    }
+    return false;
 };
 
 const createImageController = ({
@@ -82,6 +91,7 @@ const createImageController = ({
         if (!hasValidImageFile(req, res)) return;
 
         try {
+            const tagData = normalizeTags(req.body && req.body.tags);
             const mime = req.file.mimetype || 'application/octet-stream';
             const mimeToExt = {
                 'image/jpeg': 'jpg',
@@ -115,8 +125,9 @@ const createImageController = ({
                 urlMode,
                 signedUrlExpiresSeconds,
             });
-            res.json({ url });
+            res.json({ url, ...tagData });
         } catch (error) {
+            if (sendValidationError(res, error)) return;
             logError('Error uploading to Firebase Storage', error);
             res.status(500).json({ error: 'Failed to upload image to Firebase', details: error.message });
         } finally {
@@ -131,6 +142,7 @@ const createImageController = ({
         log('info', 'Received file for resize-upload', { filename: req.file.originalname });
 
         try {
+            const tagData = normalizeTags(req.body && req.body.tags);
             const fileName = `images/${uuid()}.jpg`;
             log('info', 'Uploading resized image', { fileName });
 
@@ -176,8 +188,9 @@ const createImageController = ({
                 urlMode,
                 signedUrlExpiresSeconds,
             });
-            res.json({ url });
+            res.json({ url, ...tagData });
         } catch (error) {
+            if (sendValidationError(res, error)) return;
             const message = String(error?.message || '');
             if (message.includes('Input file is missing') || message.includes('unsupported image format') || message.includes('corrupt')) {
                 return res.status(400).json({ error: 'Invalid image file.' });

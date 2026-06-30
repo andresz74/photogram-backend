@@ -17,6 +17,8 @@ const assignIfPresent = (target, key, value) => {
     }
 };
 
+const normalizeArray = (value) => (Array.isArray(value) ? [...value] : []);
+
 const createUrlOptions = (imageRecord, kind) => ({
     visibility: Boolean(imageRecord.isPublic) ? 'public' : 'private',
     kind,
@@ -58,6 +60,8 @@ function createImagePresenter({ storageProvider } = {}) {
         assignIfPresent(dto, 'mimeType', imageRecord.mimeType);
         dto.isPublic = isPublic;
         dto.isArchived = Boolean(imageRecord.archivedAt);
+        dto.tags = normalizeArray(imageRecord.tags);
+        dto.tagSlugs = normalizeArray(imageRecord.tagSlugs);
         dto.createdAt = imageRecord.createdAt;
         assignIfPresent(dto, 'updatedAt', imageRecord.updatedAt);
         assignIfPresent(dto, 'archivedAt', imageRecord.archivedAt);

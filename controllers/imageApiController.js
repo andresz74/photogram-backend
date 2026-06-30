@@ -1,3 +1,5 @@
+const { tagToSlug } = require('../utils/tags');
+
 const VALIDATION_ERROR = 'VALIDATION_ERROR';
 
 const createValidationError = (message) => {
@@ -59,6 +61,13 @@ const parsePaginationOptions = (query = {}) => {
     }
     if (offset !== undefined) {
         options.offset = offset;
+    }
+    if (Object.prototype.hasOwnProperty.call(query, 'tag')) {
+        const tag = query.tag;
+        if (Array.isArray(tag) || typeof tag !== 'string' || tag.trim() === '') {
+            throw createValidationError('tag must be a non-empty string.');
+        }
+        options.tag = tagToSlug(tag);
     }
 
     return options;

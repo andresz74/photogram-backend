@@ -103,6 +103,8 @@ test('schema includes archived_at', async () => {
         try {
             const columns = db.prepare('PRAGMA table_info(images)').all();
             assert.equal(columns.some((column) => column.name === 'archived_at'), true);
+            assert.equal(columns.some((column) => column.name === 'tags'), true);
+            assert.equal(columns.some((column) => column.name === 'tag_slugs'), true);
         } finally {
             db.close();
         }
@@ -147,10 +149,86 @@ test('migrates existing images table with archived_at', async () => {
         try {
             const columns = migratedDb.prepare('PRAGMA table_info(images)').all();
             assert.equal(columns.some((column) => column.name === 'archived_at'), true);
+            assert.equal(columns.some((column) => column.name === 'tags'), true);
+            assert.equal(columns.some((column) => column.name === 'tag_slugs'), true);
         } finally {
             migratedDb.close();
         }
     } finally {
+        await context.cleanup();
+    }
+});
+
+test('migrates existing rows without tags and returns empty tag arrays', async () => {
+    const context = await createTempContext();
+    await fs.mkdir(path.dirname(context.sqlitePath), { recursive: true });
+    const db = new Database(context.sqlitePath);
+    db.exec(`
+        CREATE TABLE images (
+            id TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL,
+            title TEXT,
+            description TEXT,
+            storage_key TEXT NOT NULL,
+            thumbnail_key TEXT,
+            mime_type TEXT,
+            width INTEGER,
+            height INTEGER,
+            size_bytes INTEGER,
+            is_public INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            deleted_at TEXT
+        );
+
+        INSERT INTO images (
+            id,
+            owner_id,
+            title,
+            description,
+            storage_key,
+            thumbnail_key,
+            mime_type,
+            width,
+            height,
+            size_bytes,
+            is_public,
+            created_at,
+            updated_at,
+            deleted_at
+        ) VALUES (
+            'legacy-1',
+            'owner-1',
+            NULL,
+            NULL,
+            'users/owner-1/images/legacy-1.webp',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            1,
+            '2026-01-01T00:00:00.000Z',
+            '2026-01-01T00:00:00.000Z',
+            NULL
+        );
+    `);
+    db.close();
+
+    const repository = createSqliteImageRepository({
+        config: {
+            sqlitePath: context.sqlitePath,
+        },
+    });
+
+    try {
+        const image = await repository.findImageById('legacy-1');
+
+        assert.deepEqual(image.tags, []);
+        assert.deepEqual(image.tagSlugs, []);
+        assert.equal(image.archivedAt, null);
+    } finally {
+        await repository.close();
         await context.cleanup();
     }
 });
@@ -205,6 +283,18 @@ test('defaults archivedAt to null', async () => {
     }
 });
 
+test('defaults tags and tagSlugs to empty arrays', async () => {
+    const context = await createRepositoryContext();
+    try {
+        const image = await createImage(context.repository);
+
+        assert.deepEqual(image.tags, []);
+        assert.deepEqual(image.tagSlugs, []);
+    } finally {
+        await context.cleanup();
+    }
+});
+
 test('defaults createdAt and updatedAt', async () => {
     const context = await createRepositoryContext();
     try {
@@ -249,6 +339,8 @@ test('returns camelCase image fields', async () => {
             'updatedAt',
             'deletedAt',
             'archivedAt',
+            'tags',
+            'tagSlugs',
         ]);
     } finally {
         await context.cleanup();
@@ -264,6 +356,50 @@ test('stores storage keys but does not return imageUrl', async () => {
         assert.equal(Object.prototype.hasOwnProperty.call(image, 'imageUrl'), false);
         assert.equal(Object.prototype.hasOwnProperty.call(image, 'thumbnailUrl'), false);
     } finally {
+        await context.cleanup();
+    }
+});
+
+test('stores and returns tags and tagSlugs as arrays', async () => {
+    const context = await createRepositoryContext();
+    try {
+        const image = await createImage(context.repository, {
+            tags: ['Dog', 'New York'],
+            tagSlugs: ['dog', 'new-york'],
+        });
+
+        assert.deepEqual(image.tags, ['Dog', 'New York']);
+        assert.deepEqual(image.tagSlugs, ['dog', 'new-york']);
+    } finally {
+        await context.cleanup();
+    }
+});
+
+test('persists tags and tagSlugs after repository close and reopen', async () => {
+    const context = await createRepositoryContext();
+    let reopenedRepository;
+
+    try {
+        await createImage(context.repository, {
+            tags: ['Dog', 'New York'],
+            tagSlugs: ['dog', 'new-york'],
+        });
+        await context.repository.close();
+
+        reopenedRepository = createSqliteImageRepository({
+            config: {
+                sqlitePath: context.sqlitePath,
+            },
+        });
+
+        const image = await reopenedRepository.findImageById('img-1');
+
+        assert.deepEqual(image.tags, ['Dog', 'New York']);
+        assert.deepEqual(image.tagSlugs, ['dog', 'new-york']);
+    } finally {
+        if (reopenedRepository) {
+            await reopenedRepository.close().catch(() => {});
+        }
         await context.cleanup();
     }
 });
@@ -423,6 +559,28 @@ test('excludes archived images from listPublicImages', async () => {
     }
 });
 
+test('listPublicImages filters by tag slug', async () => {
+    const context = await createRepositoryContext();
+    try {
+        await createImage(context.repository, {
+            id: 'dog',
+            tags: ['Dog'],
+            tagSlugs: ['dog'],
+        });
+        await createImage(context.repository, {
+            id: 'cat',
+            tags: ['Cat'],
+            tagSlugs: ['cat'],
+        });
+
+        const images = await context.repository.listPublicImages({ tag: 'dog' });
+
+        assert.deepEqual(images.map((image) => image.id), ['dog']);
+    } finally {
+        await context.cleanup();
+    }
+});
+
 test('lists only images for the requested owner from listImagesByOwner', async () => {
     const context = await createRepositoryContext();
     try {
@@ -504,6 +662,40 @@ test('listImagesByOwner includeArchived=true returns both archived and active ro
         const images = await context.repository.listImagesByOwner('owner-1', { includeArchived: true });
 
         assert.deepEqual(images.map((image) => image.id), ['active', 'archived']);
+    } finally {
+        await context.cleanup();
+    }
+});
+
+test('listImagesByOwner filters by tag slug', async () => {
+    const context = await createRepositoryContext();
+    try {
+        await createImage(context.repository, {
+            id: 'dog',
+            tags: ['Dog'],
+            tagSlugs: ['dog'],
+        });
+        await createImage(context.repository, {
+            id: 'cat',
+            tags: ['Cat'],
+            tagSlugs: ['cat'],
+        });
+
+        const images = await context.repository.listImagesByOwner('owner-1', { tag: 'cat' });
+
+        assert.deepEqual(images.map((image) => image.id), ['cat']);
+    } finally {
+        await context.cleanup();
+    }
+});
+
+test('listImagesByOwner rejects invalid tag slug filters', async () => {
+    const context = await createRepositoryContext();
+    try {
+        await assert.rejects(
+            () => context.repository.listImagesByOwner('owner-1', { tag: 'Dog' }),
+            /tag/,
+        );
     } finally {
         await context.cleanup();
     }

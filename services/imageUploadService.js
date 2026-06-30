@@ -1,6 +1,7 @@
 const { v4: uuid } = require('uuid');
 
 const { cleanTempFile } = require('./imageProcessor');
+const { normalizeTags } = require('../utils/tags');
 
 const VALIDATION_ERROR = 'VALIDATION_ERROR';
 const UNAUTHENTICATED = 'UNAUTHENTICATED';
@@ -192,6 +193,7 @@ function createImageUploadService({
             const title = parseOptionalString(uploadFields, 'title');
             const description = parseOptionalString(uploadFields, 'description');
             const isPublic = parseIsPublic(uploadFields);
+            const { tags, tagSlugs } = normalizeTags(uploadFields.tags);
             const savedStorageKeys = [];
 
             const processed = await processImage(file, {
@@ -248,6 +250,8 @@ function createImageUploadService({
                 height: processed.height ?? null,
                 sizeBytes: getSizeBytes(processed, mainSaveResult),
                 isPublic,
+                tags,
+                tagSlugs,
             };
 
             try {

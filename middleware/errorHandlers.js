@@ -12,6 +12,9 @@ const multerErrorHandler = (err, req, res, next) => {
 
 const fallbackErrorHandler = (err, req, res, next) => {
     logError('Unhandled server error', err);
+    if (Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 500) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
     return res.status(500).json({ error: 'Internal server error' });
 };
 
