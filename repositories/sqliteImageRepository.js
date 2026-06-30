@@ -43,9 +43,31 @@ const normalizePagination = (options = {}) => {
     };
 };
 
+const normalizeTagPattern = (options = {}) => {
+    if (options.tag === undefined || options.tag === null || options.tag === '') {
+        return undefined;
+    }
+    if (typeof options.tag !== 'string' || !/^[a-z0-9-]+$/.test(options.tag)) {
+        throw new Error('tag must be a lowercase tag slug.');
+    }
+    return `%"${options.tag}"%`;
+};
+
 const toSqliteBoolean = (value) => (value === false ? 0 : 1);
 
 const nowIso = () => new Date().toISOString();
+
+const parseJsonArray = (value) => {
+    if (!value) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        return [];
+    }
+};
+
+const stringifyArray = (value) => JSON.stringify(Array.isArray(value) ? value : []);
 
 const mapRowToImage = (row) => {
     if (!row) return null;
@@ -66,6 +88,8 @@ const mapRowToImage = (row) => {
         updatedAt: row.updated_at,
         deletedAt: row.deleted_at,
         archivedAt: row.archived_at,
+        tags: parseJsonArray(row.tags),
+        tagSlugs: parseJsonArray(row.tag_slugs),
     };
 };
 
@@ -95,7 +119,9 @@ const initializeSchema = (db) => {
             created_at TEXT NOT NULL,
             updated_at TEXT,
             deleted_at TEXT,
-            archived_at TEXT
+            archived_at TEXT,
+            tags TEXT,
+            tag_slugs TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_images_public_created
@@ -109,10 +135,15 @@ const initializeSchema = (db) => {
     `);
 
     ensureColumn(db, 'images', 'archived_at', 'archived_at TEXT');
+    ensureColumn(db, 'images', 'tags', 'tags TEXT');
+    ensureColumn(db, 'images', 'tag_slugs', 'tag_slugs TEXT');
 
     db.exec(`
         CREATE INDEX IF NOT EXISTS idx_images_archived
         ON images (archived_at);
+
+        CREATE INDEX IF NOT EXISTS idx_images_tag_slugs
+        ON images (tag_slugs);
     `);
 };
 
@@ -141,7 +172,9 @@ const createSqliteImageRepository = ({ config } = {}) => {
             created_at,
             updated_at,
             deleted_at,
-            archived_at
+            archived_at,
+            tags,
+            tag_slugs
         ) VALUES (
             @id,
             @ownerId,
@@ -157,7 +190,9 @@ const createSqliteImageRepository = ({ config } = {}) => {
             @createdAt,
             @updatedAt,
             NULL,
-            NULL
+            NULL,
+            @tags,
+            @tagSlugs
         )
     `);
     const findByIdActive = db.prepare('SELECT * FROM images WHERE id = ? AND deleted_at IS NULL');
@@ -170,11 +205,29 @@ const createSqliteImageRepository = ({ config } = {}) => {
         ORDER BY created_at DESC
         LIMIT @limit OFFSET @offset
     `);
+    const listPublicByTag = db.prepare(`
+        SELECT * FROM images
+        WHERE is_public = 1
+            AND deleted_at IS NULL
+            AND archived_at IS NULL
+            AND tag_slugs LIKE @tagPattern
+        ORDER BY created_at DESC
+        LIMIT @limit OFFSET @offset
+    `);
     const listByOwnerActive = db.prepare(`
         SELECT * FROM images
         WHERE owner_id = @ownerId
             AND deleted_at IS NULL
             AND archived_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT @limit OFFSET @offset
+    `);
+    const listByOwnerActiveByTag = db.prepare(`
+        SELECT * FROM images
+        WHERE owner_id = @ownerId
+            AND deleted_at IS NULL
+            AND archived_at IS NULL
+            AND tag_slugs LIKE @tagPattern
         ORDER BY created_at DESC
         LIMIT @limit OFFSET @offset
     `);
@@ -186,10 +239,27 @@ const createSqliteImageRepository = ({ config } = {}) => {
         ORDER BY created_at DESC
         LIMIT @limit OFFSET @offset
     `);
+    const listByOwnerArchivedByTag = db.prepare(`
+        SELECT * FROM images
+        WHERE owner_id = @ownerId
+            AND deleted_at IS NULL
+            AND archived_at IS NOT NULL
+            AND tag_slugs LIKE @tagPattern
+        ORDER BY created_at DESC
+        LIMIT @limit OFFSET @offset
+    `);
     const listByOwnerAll = db.prepare(`
         SELECT * FROM images
         WHERE owner_id = @ownerId
             AND deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT @limit OFFSET @offset
+    `);
+    const listByOwnerAllByTag = db.prepare(`
+        SELECT * FROM images
+        WHERE owner_id = @ownerId
+            AND deleted_at IS NULL
+            AND tag_slugs LIKE @tagPattern
         ORDER BY created_at DESC
         LIMIT @limit OFFSET @offset
     `);
@@ -247,6 +317,8 @@ const createSqliteImageRepository = ({ config } = {}) => {
             isPublic: toSqliteBoolean(imageData.isPublic),
             createdAt,
             updatedAt,
+            tags: stringifyArray(imageData.tags),
+            tagSlugs: stringifyArray(imageData.tagSlugs),
         };
 
         try {
@@ -272,19 +344,26 @@ const createSqliteImageRepository = ({ config } = {}) => {
 
     const listPublicImages = async (options = {}) => {
         const pagination = normalizePagination(options);
-        return listPublic.all(pagination).map(mapRowToImage);
+        const tagPattern = normalizeTagPattern(options);
+        const statement = tagPattern ? listPublicByTag : listPublic;
+        return statement.all({ ...pagination, tagPattern }).map(mapRowToImage);
     };
 
     const listImagesByOwner = async (ownerId, options = {}) => {
         requireNonEmptyString(ownerId, 'ownerId');
         const pagination = normalizePagination(options);
-        const statement = options.archived === true
-            ? listByOwnerArchived
-            : options.includeArchived === true
-                ? listByOwnerAll
-                : listByOwnerActive;
+        const tagPattern = normalizeTagPattern(options);
+        let statement;
 
-        return statement.all({ ownerId, ...pagination }).map(mapRowToImage);
+        if (options.archived === true) {
+            statement = tagPattern ? listByOwnerArchivedByTag : listByOwnerArchived;
+        } else if (options.includeArchived === true) {
+            statement = tagPattern ? listByOwnerAllByTag : listByOwnerAll;
+        } else {
+            statement = tagPattern ? listByOwnerActiveByTag : listByOwnerActive;
+        }
+
+        return statement.all({ ownerId, ...pagination, tagPattern }).map(mapRowToImage);
     };
 
     const updateImageVisibility = async (imageId, ownerId, isPublic) => {

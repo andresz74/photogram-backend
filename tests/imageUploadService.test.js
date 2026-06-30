@@ -281,6 +281,8 @@ test('calls imageService.createImage with metadata', async () => {
         height: 960,
         sizeBytes: 14,
         isPublic: true,
+        tags: [],
+        tagSlugs: [],
     });
 });
 
@@ -327,6 +329,29 @@ test('parses isPublic false', async () => {
     });
 
     assert.equal(imageService.calls[0].imageData.isPublic, false);
+});
+
+test('passes normalized tags from fields', async () => {
+    const { service, imageService } = createDependencies();
+
+    await uploadWithDefaults(service, {
+        fields: {
+            tags: JSON.stringify(['#Dog', 'golden   retriever', 'New York', 'dog']),
+        },
+    });
+
+    assert.deepEqual(imageService.calls[0].imageData.tags, ['Dog', 'golden retriever', 'New York']);
+    assert.deepEqual(imageService.calls[0].imageData.tagSlugs, ['dog', 'golden-retriever', 'new-york']);
+});
+
+test('rejects malformed tags before storage writes', async () => {
+    const { service, storageProvider } = createDependencies();
+
+    await assert.rejects(
+        () => uploadWithDefaults(service, { fields: { tags: 'dog,golden retriever' } }),
+        /valid JSON/,
+    );
+    assert.equal(storageProvider.calls.length, 0);
 });
 
 test('rejects invalid isPublic', async () => {

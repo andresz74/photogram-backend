@@ -288,6 +288,23 @@ test('listPublicImages passes parsed offset', async () => {
     assert.equal(imageService.calls[0].options.offset, 0);
 });
 
+test('listPublicImages passes normalized tag slug', async () => {
+    const { controller, imageService } = createControllerContext();
+
+    await controller.listPublicImages({ query: { tag: 'New York' } }, createResponse(), createNext());
+
+    assert.equal(imageService.calls[0].options.tag, 'new-york');
+});
+
+test('listPublicImages rejects invalid tag query option', async () => {
+    const { controller } = createControllerContext();
+    const next = createNext();
+
+    await controller.listPublicImages({ query: { tag: 'dog,cat' } }, createResponse(), next);
+
+    assertValidationError(next.calls[0], 'commas');
+});
+
 test('listPublicImages omits pagination options when query is empty', async () => {
     const { controller, imageService } = createControllerContext();
 
@@ -339,6 +356,14 @@ test('listMyImages parses includeArchived query option', async () => {
     await controller.listMyImages({ query: { includeArchived: 'true' } }, createResponse(), createNext());
 
     assert.deepEqual(imageService.calls[0].options, { includeArchived: true });
+});
+
+test('listMyImages parses tag query option', async () => {
+    const { controller, imageService } = createControllerContext();
+
+    await controller.listMyImages({ query: { tag: 'golden retriever' } }, createResponse(), createNext());
+
+    assert.deepEqual(imageService.calls[0].options, { tag: 'golden-retriever' });
 });
 
 test('listMyImages rejects invalid archived query option', async () => {

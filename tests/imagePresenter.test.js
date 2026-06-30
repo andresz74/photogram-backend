@@ -104,6 +104,8 @@ test('maps a full image record to a frontend DTO', async () => {
         mimeType: 'image/webp',
         isPublic: true,
         isArchived: false,
+        tags: [],
+        tagSlugs: [],
         createdAt: '2026-06-22T00:00:00.000Z',
         updatedAt: '2026-06-22T01:00:00.000Z',
     });
@@ -231,6 +233,27 @@ test('preserves archivedAt when present', async () => {
     }));
 
     assert.equal(dto.archivedAt, '2026-06-23T00:00:00.000Z');
+});
+
+test('preserves tags and tagSlugs when present', async () => {
+    const presenter = createImagePresenter({ storageProvider: createStorageProvider() });
+
+    const dto = await presenter.toImageDto(createImageRecord({
+        tags: ['Dog', 'New York'],
+        tagSlugs: ['dog', 'new-york'],
+    }));
+
+    assert.deepEqual(dto.tags, ['Dog', 'New York']);
+    assert.deepEqual(dto.tagSlugs, ['dog', 'new-york']);
+});
+
+test('defaults missing tags to empty arrays', async () => {
+    const presenter = createImagePresenter({ storageProvider: createStorageProvider() });
+
+    const dto = await presenter.toImageDto(createImageRecord());
+
+    assert.deepEqual(dto.tags, []);
+    assert.deepEqual(dto.tagSlugs, []);
 });
 
 test('preserves ownerId', async () => {
